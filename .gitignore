@@ -1,0 +1,8 @@
+node_modules
+.next
+.output
+.wxt
+dist
+*.tsbuildinfo
+.DS_Store
+coverage

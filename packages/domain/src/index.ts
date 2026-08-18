@@ -1,0 +1,44 @@
+export const TAYLOREDSPACE_BRIDGE_EVENT = "tayloredspace:capture" as const;
+
+export type TayloredPieceType = "product" | "inspiration" | "render" | "upload" | "note";
+
+export type ProductMetadata = {
+  sourceUrl: string;
+  title?: string;
+  price?: string;
+  currency?: string;
+  retailer?: string;
+};
+
+export type PiecePosition = { x: number; y: number; width: number; height: number };
+
+export type TayloredPiece = {
+  id: string;
+  boardId: string;
+  type: TayloredPieceType;
+  createdAt: string;
+  updatedAt: string;
+  imageDataUrl?: string;
+  text?: string;
+  product?: ProductMetadata;
+  position: PiecePosition;
+};
+
+export type ExtensionCapture = {
+  id: string;
+  capturedAt: string;
+  imageUrl: string;
+  imageDataUrl?: string;
+  product: ProductMetadata;
+};
+
+export const captureToPiece = (capture: ExtensionCapture, boardId = "default"): TayloredPiece => ({
+  id: capture.id,
+  boardId,
+  type: "product",
+  createdAt: capture.capturedAt,
+  updatedAt: capture.capturedAt,
+  imageDataUrl: capture.imageDataUrl ?? capture.imageUrl,
+  product: capture.product,
+  position: { x: 120, y: 120, width: 320, height: 320 },
+});

@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+:root { --paper: #f7f4ee; --ink: #28241f; --sage: #63725b; --clay: #b9684f; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--paper); color: var(--ink); }
+body { font-family: Arial, Helvetica, sans-serif; }
+button { font: inherit; }
+button { cursor: pointer; }
+.excalidraw .App-menu_top { top: 72px; }
+.excalidraw .layer-ui__wrapper__footer-center { margin-bottom: 8px; }

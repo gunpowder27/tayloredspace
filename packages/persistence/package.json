@@ -1,0 +1,10 @@
+{
+  "name": "@tayloredspace/persistence",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@tayloredspace/domain": "*", "idb": "^8.0.2" },
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "devDependencies": { "typescript": "^5.7.3" }
+}
