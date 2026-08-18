@@ -5,18 +5,18 @@ import type { ExcalidrawImperativeAPI, BinaryFiles } from "@excalidraw/excalidra
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import { captureToPiece, TAYLOREDSPACE_BRIDGE_EVENT, type ExtensionCapture, type TayloredPiece } from "@tayloredspace/domain";
 import { imageAssetStore, pieceStore } from "@tayloredspace/persistence";
-import { Armchair, ChevronDown, CircleDollarSign, ExternalLink, Grid2X2, ImageIcon, ImagePlus, Layers3, Link2, PackageOpen, Plus, RefreshCw, Scissors, Search, Settings2, Trash2, WandSparkles } from "lucide-react";
+import { ArrowRight, Armchair, Check, ChevronDown, CircleDollarSign, ExternalLink, Grid2X2, ImageIcon, ImagePlus, Layers3, Link2, PackageOpen, Plus, RefreshCw, Scissors, Search, Settings2, Trash2, WandSparkles, X } from "lucide-react";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { removeImageBackground } from "../lib/background-removal";
 import { blobToDataUrl, dataUrlToBlob } from "../lib/image-processing";
 
-const toFileId = (id: string) => `piece-${id}` as never;
+const toFileId = (id: string, variant: TayloredPiece["imageVariant"] = "original") => `piece-${id}-${variant}` as never;
 const pieceElements = (piece: TayloredPiece, index: number): ExcalidrawElement[] => {
   const x = piece.position.x + (index % 4) * 36;
   const y = piece.position.y + (index % 4) * 36;
   const elements = convertToExcalidrawElements([
-    { type: "image", x, y, width: piece.position.width, height: piece.position.height, fileId: toFileId(piece.id), customData: { pieceId: piece.id, product: piece.product } },
+    { type: "image", x, y, width: piece.position.width, height: piece.position.height, fileId: toFileId(piece.id, piece.imageVariant), customData: { pieceId: piece.id, product: piece.product } },
     { type: "text", x, y: y + piece.position.height + 14, text: [piece.product?.title, piece.product?.price].filter(Boolean).join(" · ") || "Saved product", fontSize: 18, strokeColor: "#28241f", customData: { pieceId: piece.id } },
   ]);
   return elements as ExcalidrawElement[];
@@ -32,6 +32,8 @@ export function Board() {
   const [selectedPieceId, setSelectedPieceId] = useState<string>();
   const [assetUrls, setAssetUrls] = useState<Record<string, { original: string; cutout?: string }>>({});
   const [processing, setProcessing] = useState<Record<string, string>>({});
+  const [tourOpen, setTourOpen] = useState(true);
+  const [tourStep, setTourStep] = useState(0);
 
   const processPieceImage = useCallback(async (piece: TayloredPiece, force = false) => {
     if (!piece.imageDataUrl && !piece.imageAssetId) return;
@@ -40,7 +42,10 @@ export function Board() {
     setProcessing((current) => ({ ...current, [piece.id]: "Preparing image…" }));
     try {
       const original = stored?.original ?? await dataUrlToBlob(piece.imageDataUrl!);
-      const cutout = await removeImageBackground(original, (label) => setProcessing((current) => ({ ...current, [piece.id]: label })));
+      const cutout = await removeImageBackground(original, (label) => {
+        setProcessing((current) => ({ ...current, [piece.id]: label }));
+        setStatus(label);
+      });
       await imageAssetStore.put({ pieceId: piece.id, original, cutout, updatedAt: new Date().toISOString() });
       const urls = { original: await blobToDataUrl(original), cutout: await blobToDataUrl(cutout) };
       setAssetUrls((current) => ({ ...current, [piece.id]: urls }));
@@ -48,6 +53,7 @@ export function Board() {
       await pieceStore.put(updated);
       setPieces((current) => current.map((item) => item.id === updated.id ? updated : item));
       setStatus("Background removed — original is still saved");
+      setTourStep((current) => current === 1 ? 2 : current);
     } catch {
       setStatus("Cutout could not be made. The original is safe — try again.");
     } finally {
@@ -93,7 +99,8 @@ export function Board() {
     const stored = assetUrls[piece.id];
     const dataURL = piece.imageVariant === "cutout" ? stored?.cutout : stored?.original ?? piece.imageDataUrl;
     if (!dataURL?.startsWith("data:")) return [];
-    return [[toFileId(piece.id), { id: toFileId(piece.id), dataURL: dataURL as never, mimeType: (dataURL.slice(5, dataURL.indexOf(";")) || "image/png") as never, created: Date.parse(piece.createdAt), lastRetrieved: Date.now() }]];
+    const fileId = toFileId(piece.id, piece.imageVariant);
+    return [[fileId, { id: fileId, dataURL: dataURL as never, mimeType: (dataURL.slice(5, dataURL.indexOf(";")) || "image/png") as never, created: Date.parse(piece.createdAt), lastRetrieved: Date.now() }]];
   })), [pieces, assetUrls]);
   const elements = useMemo(() => pieces.flatMap(pieceElements), [pieces]);
   useEffect(() => { if (apiRef.current && elements.length) { apiRef.current.addFiles(Object.values(files)); apiRef.current.updateScene({ elements }); } }, [elements, files]);
@@ -139,11 +146,26 @@ export function Board() {
     setSelectedPieceId(undefined);
     setStatus("Piece removed from this board");
   };
+  const startGuidedDemo = async () => {
+    setTourStep(1);
+    const saved = pieces[0];
+    if (!saved) return addProductToBoard(products[2]);
+    setSelectedPieceId(saved.id);
+    if (assetUrls[saved.id]?.cutout) {
+      const updated = { ...saved, imageVariant: "cutout" as const, updatedAt: new Date().toISOString() };
+      await pieceStore.put(updated);
+      setPieces((current) => current.map((piece) => piece.id === updated.id ? updated : piece));
+      setStatus("Cutout ready — click and drag the product to style your board");
+      setTourStep(2);
+      return;
+    }
+    await processPieceImage(saved);
+  };
 
   return <main className="flex h-screen min-w-[1040px] flex-col overflow-hidden bg-[#eeebe4] text-[#24221f]">
     <header className="flex h-[72px] shrink-0 items-center border-b border-black/[.07] bg-[#f8f6f1] px-5">
       <div className="flex w-[278px] items-center gap-3 border-r border-black/[.07]"><div className="relative h-11 w-11 overflow-hidden rounded-xl border border-black/10 bg-white shadow-sm"><Image src="/tayloredspace-logo.jpg" alt="TayloredSpace swallow" fill sizes="44px" priority className="object-cover"/></div><div><h1 className="font-serif text-[21px] leading-none tracking-tight">TayloredSpace</h1><p className="mt-1.5 text-[10px] font-semibold uppercase tracking-[.17em] text-[#9a6b58]">Design what feels like you</p></div></div>
-      <div className="flex flex-1 items-center justify-between pl-6"><button className="flex items-center gap-2 text-sm font-semibold">Austin living room <ChevronDown className="h-4 w-4 text-black/45"/></button><div className="flex items-center gap-3"><div className="flex max-w-[310px] items-center gap-2 truncate rounded-full bg-[#e9efe9] px-3 py-2 text-[11px] font-medium text-[#4b6354]"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#66866f]"/>{status}</div><button className="rounded-full border border-black/10 bg-white px-4 py-2 text-xs font-semibold shadow-sm">Share preview</button><button aria-label="Settings" className="grid h-9 w-9 place-items-center rounded-full border border-black/10 bg-white"><Settings2 className="h-4 w-4"/></button></div></div>
+      <div className="flex flex-1 items-center justify-between pl-6"><button className="flex items-center gap-2 text-sm font-semibold">Austin living room <ChevronDown className="h-4 w-4 text-black/45"/></button><div className="flex items-center gap-3"><div className="flex max-w-[310px] items-center gap-2 truncate rounded-full bg-[#e9efe9] px-3 py-2 text-[11px] font-medium text-[#4b6354]"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#66866f]"/>{status}</div><button onClick={() => { setTourStep(0); setTourOpen(true); }} className="flex items-center gap-2 rounded-full border border-[#9a6b58]/20 bg-[#f4ece4] px-4 py-2 text-xs font-semibold text-[#795747]"><WandSparkles className="h-3.5 w-3.5"/>Demo tour</button><button className="rounded-full border border-black/10 bg-white px-4 py-2 text-xs font-semibold shadow-sm">Share preview</button><button aria-label="Settings" className="grid h-9 w-9 place-items-center rounded-full border border-black/10 bg-white"><Settings2 className="h-4 w-4"/></button></div></div>
     </header>
 
     <div className="flex min-h-0 flex-1">
@@ -158,9 +180,10 @@ export function Board() {
       </aside>
 
       <section className="relative min-w-0 flex-1 bg-[#dedbd3] p-4">
+        {tourOpen && <div className="absolute bottom-10 left-1/2 z-40 w-[430px] -translate-x-1/2 overflow-hidden rounded-[24px] border border-black/10 bg-[#26392f] text-white shadow-[0_24px_80px_rgba(25,31,27,.3)]"><div className="flex items-start justify-between px-6 pt-5"><div><p className="text-[10px] font-bold uppercase tracking-[.18em] text-[#dec8a5]">60-second demo · {tourStep + 1} of 3</p><h3 className="mt-2 font-serif text-[24px]">{["Choose a product", "Watch the magic", "Style it your way"][tourStep]}</h3></div><button onClick={() => setTourOpen(false)} aria-label="Close demo tour" className="rounded-full p-1 text-white/55 hover:bg-white/10 hover:text-white"><X className="h-4 w-4"/></button></div><p className="px-6 pt-2 text-[12px] leading-5 text-white/65">{[pieces.length ? "Use the saved piece already on your board. TayloredSpace will show its transparent cutout automatically." : "Pick the chair below. It lands on the board and TayloredSpace starts the cutout automatically.", "The first run downloads the private on-device model. Follow the progress at the top—your image never leaves this browser.", "The cutout is now on the board. Click it to move or resize it; the right panel lets you compare Original and Cutout."][tourStep]}</p><div className="mt-5 flex items-center justify-between border-t border-white/10 px-6 py-4"><div className="flex gap-1.5">{[0,1,2].map((step) => <span key={step} className={step <= tourStep ? "h-1.5 w-7 rounded-full bg-[#dec8a5]" : "h-1.5 w-7 rounded-full bg-white/15"}/>)}</div>{tourStep === 0 ? <button onClick={() => void startGuidedDemo()} className="flex items-center gap-2 rounded-full bg-[#dec8a5] px-4 py-2 text-[11px] font-bold text-[#26392f]">{pieces.length ? "Demo saved piece" : "Try the chair"} <ArrowRight className="h-3.5 w-3.5"/></button> : tourStep === 1 ? <span className="flex items-center gap-2 text-[11px] font-semibold text-[#dec8a5]"><RefreshCw className="h-3.5 w-3.5 animate-spin"/>{Object.values(processing)[0] ?? "Preparing cutout…"}</span> : <button onClick={() => setTourOpen(false)} className="flex items-center gap-2 rounded-full bg-[#dec8a5] px-4 py-2 text-[11px] font-bold text-[#26392f]"><Check className="h-3.5 w-3.5"/>Explore the board</button>}</div></div>}
         <div className="absolute left-1/2 top-7 z-20 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-black/[.08] bg-white/95 p-1.5 shadow-[0_8px_30px_rgba(42,37,31,.12)] backdrop-blur"><button className="flex items-center gap-2 rounded-lg bg-[#f0eee9] px-3 py-2 text-[11px] font-semibold"><Grid2X2 className="h-3.5 w-3.5"/>Board</button><button className="flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-black/45"><Layers3 className="h-3.5 w-3.5"/>Room view</button></div>
         <div className="h-full overflow-hidden rounded-[22px] border border-black/[.08] bg-[#f9f8f5] shadow-[0_16px_50px_rgba(52,46,38,.08)]">
-          <Excalidraw onChange={(sceneElements, appState) => { const selected = sceneElements.find((element) => appState.selectedElementIds[element.id])?.customData?.pieceId as string | undefined; setSelectedPieceId(selected); for (const element of sceneElements) { const pieceId = element.customData?.pieceId as string | undefined; if (pieceId && element.type === "image") { const piece = pieces.find((item) => item.id === pieceId); if (piece && (piece.position.x !== element.x || piece.position.y !== element.y || piece.position.width !== element.width || piece.position.height !== element.height)) void pieceStore.put({ ...piece, updatedAt: new Date().toISOString(), position: { x: element.x, y: element.y, width: element.width, height: element.height } }); } } }} excalidrawAPI={(api) => { apiRef.current = api; if (elements.length) { api.addFiles(Object.values(files)); api.updateScene({ elements }); } }} initialData={{ elements, files, appState: { viewBackgroundColor: "#f9f8f5" } }} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false } }}/>
+          <Excalidraw onChange={(sceneElements, appState) => { const selected = sceneElements.find((element) => appState.selectedElementIds[element.id])?.customData?.pieceId as string | undefined; if (selected) setSelectedPieceId(selected); for (const element of sceneElements) { const pieceId = element.customData?.pieceId as string | undefined; if (pieceId && element.type === "image") { const piece = pieces.find((item) => item.id === pieceId); if (piece && (piece.position.x !== element.x || piece.position.y !== element.y || piece.position.width !== element.width || piece.position.height !== element.height)) void pieceStore.put({ ...piece, updatedAt: new Date().toISOString(), position: { x: element.x, y: element.y, width: element.width, height: element.height } }); } } }} excalidrawAPI={(api) => { apiRef.current = api; if (elements.length) { api.addFiles(Object.values(files)); api.updateScene({ elements }); } }} initialData={{ elements, files, appState: { viewBackgroundColor: "#f9f8f5" } }} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false } }}/>
         </div>
         {!pieces.length && <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 w-[430px] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-black/[.08] bg-white/90 p-8 text-center shadow-[0_25px_80px_rgba(43,37,31,.14)] backdrop-blur-xl"><div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-[#ebe1d6] text-[#9a6b58]"><Armchair className="h-6 w-6"/></div><p className="mt-5 text-[10px] font-bold uppercase tracking-[.18em] text-[#9a6b58]">Austin living room</p><h2 className="mt-2 font-serif text-[30px] tracking-tight">Create a room you can actually buy</h2><p className="mx-auto mt-3 max-w-[330px] text-sm leading-6 text-black/50">Drag saved pieces onto the canvas, mix in inspiration, and shape a room that feels unmistakably yours.</p><div className="mt-6 flex justify-center gap-2"><button className="pointer-events-auto rounded-full bg-[#26392f] px-5 py-2.5 text-xs font-semibold text-white">Start with saved pieces</button><button className="pointer-events-auto rounded-full border border-black/10 bg-white px-5 py-2.5 text-xs font-semibold">Upload a room</button></div></div>}
       </section>
