@@ -24,8 +24,11 @@ Before a public presentation, manually smoke-test the exact retailer URLs planne
 ## Phase 1 exit gate
 
 - Production web and extension builds pass.
-- Extension extraction suite passes all eight cases.
+- Extension extraction suite passes all nine cases.
 - Guided tour, catalog cards, and model-loading progress render without browser console errors.
 - Original assets survive cutout creation and retry.
 - The extension ZIP is attached to a GitHub prerelease.
 
+## Alpha 2 interaction QA
+
+The release checklist and browser evidence are recorded in [UI-QA-2026-08.md](UI-QA-2026-08.md).
