@@ -40,6 +40,10 @@ function getWorker() {
   return sharedWorker;
 }
 
+export function warmImageBackgroundRemoval() {
+  getWorker().postMessage({ id: "tayloredspace-warmup", type: "warmup" });
+}
+
 export async function removeImageBackground(source: Blob, onProgress?: (label: string) => void) {
   onProgress?.("Preparing image…");
   const resized = await resizeForRemoval(source);
