@@ -30,10 +30,12 @@ export function extractProduct(document: Document, pageUrl = document.location.h
   const rawImage = first(source?.image as string | JsonRecord | Array<string | JsonRecord> | undefined) ?? first(product?.image as string | JsonRecord | Array<string | JsonRecord> | undefined);
   const imageUrl = typeof rawImage === "object" ? text(rawImage.url ?? rawImage.contentUrl) : text(rawImage);
   const priced = document.querySelector<HTMLElement>('[itemprop="price"], [data-price], .price, [class*="Price"]');
+  const visibleTitle = document.querySelector<HTMLElement>("main h1, h1, main h2")?.textContent?.trim();
+  const visibleImage = document.querySelector<HTMLImageElement>('[data-testid*="product"] img[src], main picture img[src], main img[src]');
   return {
     sourceUrl: document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.href || pageUrl,
-    imageUrl: imageUrl ?? meta("og:image", "twitter:image", "image"),
-    title: text(source?.name) ?? text(product?.name) ?? meta("og:title", "twitter:title") ?? document.title.trim(),
+    imageUrl: imageUrl ?? meta("og:image", "twitter:image", "image") ?? (visibleImage?.currentSrc || visibleImage?.src),
+    title: text(source?.name) ?? text(product?.name) ?? meta("og:title", "twitter:title", "name") ?? visibleTitle ?? document.title.trim(),
     price: offer.price ?? meta("product:price:amount", "og:price:amount", "price") ?? priced?.getAttribute("content") ?? priced?.textContent?.trim(),
     currency: offer.currency ?? meta("product:price:currency", "og:price:currency", "priceCurrency"),
     retailer: document.location.hostname.replace(/^www\./, ""),

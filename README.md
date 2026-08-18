@@ -23,6 +23,8 @@ Open `http://localhost:3000`. In Chrome, visit `chrome://extensions`, enable Dev
 
 The first background-removal run downloads the ORMBG model. Later runs reuse the browser cache. Select a product on the board to switch between **Original** and **Cutout**, or retry removal.
 
+For presentations, follow the [five-minute demo runbook](docs/DEMO-READINESS.md). The bounded post-demo milestone is the [Room Mode foundation](docs/ROOM-MODE-NEXT.md).
+
 ## Quality checks
 
 ```bash

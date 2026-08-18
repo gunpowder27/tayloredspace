@@ -22,11 +22,13 @@ Turn the Phase 0 capture loop into a convincing, editable local-first workspace.
 
 ## Acceptance criteria
 
-- [ ] Filtering the library changes the visible product cards.
-- [ ] Choosing a product adds it to the canvas as a movable image.
-- [ ] Moving or resizing the image survives page refresh.
-- [ ] Selecting the image opens its inspector.
-- [ ] Metadata edits survive refresh.
-- [ ] Removing a piece removes it from IndexedDB and the scene.
-- [ ] A captured product gets a transparent cutout without uploading its image.
-- [ ] Original/cutout selection survives refresh and retry never destroys the original.
+- [x] Filtering the library changes the visible product cards.
+- [x] Choosing a product adds it to the canvas as a movable image.
+- [x] Moving or resizing the image survives page refresh.
+- [x] Selecting the image opens its inspector.
+- [x] Metadata edits survive refresh.
+- [x] Removing a piece removes it from IndexedDB and the scene.
+- [x] A captured product gets a transparent cutout without uploading its image.
+- [x] Original/cutout selection survives refresh and retry never destroys the original.
+
+The repeatable presentation flow and retailer coverage are documented in `DEMO-READINESS.md`. The next bounded milestone is in `ROOM-MODE-NEXT.md`.
