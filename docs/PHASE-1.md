@@ -16,6 +16,8 @@ Turn the Phase 0 capture loop into a convincing, editable local-first workspace.
 - Canvas selection connected to a product inspector.
 - Editable title, price, and retailer metadata.
 - Local product removal.
+- Automatic on-device background removal with original/cutout/retry controls.
+- Original and cutout blobs persisted locally in IndexedDB.
 - The Phase 0 extension capture queue remains the ingestion path for real retailers.
 
 ## Acceptance criteria
@@ -26,3 +28,5 @@ Turn the Phase 0 capture loop into a convincing, editable local-first workspace.
 - [ ] Selecting the image opens its inspector.
 - [ ] Metadata edits survive refresh.
 - [ ] Removing a piece removes it from IndexedDB and the scene.
+- [ ] A captured product gets a transparent cutout without uploading its image.
+- [ ] Original/cutout selection survives refresh and retry never destroys the original.

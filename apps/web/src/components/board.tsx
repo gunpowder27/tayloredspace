@@ -4,10 +4,12 @@ import { Excalidraw, convertToExcalidrawElements } from "@excalidraw/excalidraw"
 import type { ExcalidrawImperativeAPI, BinaryFiles } from "@excalidraw/excalidraw/types";
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import { captureToPiece, TAYLOREDSPACE_BRIDGE_EVENT, type ExtensionCapture, type TayloredPiece } from "@tayloredspace/domain";
-import { pieceStore } from "@tayloredspace/persistence";
-import { Armchair, ChevronDown, CircleDollarSign, ExternalLink, Grid2X2, Heart, ImagePlus, Layers3, Link2, PackageOpen, Plus, Search, Settings2, Trash2, WandSparkles } from "lucide-react";
+import { imageAssetStore, pieceStore } from "@tayloredspace/persistence";
+import { Armchair, ChevronDown, CircleDollarSign, ExternalLink, Grid2X2, ImageIcon, ImagePlus, Layers3, Link2, PackageOpen, Plus, RefreshCw, Scissors, Search, Settings2, Trash2, WandSparkles } from "lucide-react";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { removeImageBackground } from "../lib/background-removal";
+import { blobToDataUrl, dataUrlToBlob } from "../lib/image-processing";
 
 const toFileId = (id: string) => `piece-${id}` as never;
 const pieceElements = (piece: TayloredPiece, index: number): ExcalidrawElement[] => {
@@ -28,6 +30,30 @@ export function Board() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
   const [selectedPieceId, setSelectedPieceId] = useState<string>();
+  const [assetUrls, setAssetUrls] = useState<Record<string, { original: string; cutout?: string }>>({});
+  const [processing, setProcessing] = useState<Record<string, string>>({});
+
+  const processPieceImage = useCallback(async (piece: TayloredPiece, force = false) => {
+    if (!piece.imageDataUrl && !piece.imageAssetId) return;
+    const stored = await imageAssetStore.get(piece.id);
+    if (stored?.cutout && !force) return;
+    setProcessing((current) => ({ ...current, [piece.id]: "Preparing image…" }));
+    try {
+      const original = stored?.original ?? await dataUrlToBlob(piece.imageDataUrl!);
+      const cutout = await removeImageBackground(original, (label) => setProcessing((current) => ({ ...current, [piece.id]: label })));
+      await imageAssetStore.put({ pieceId: piece.id, original, cutout, updatedAt: new Date().toISOString() });
+      const urls = { original: await blobToDataUrl(original), cutout: await blobToDataUrl(cutout) };
+      setAssetUrls((current) => ({ ...current, [piece.id]: urls }));
+      const updated = { ...piece, imageAssetId: piece.id, imageVariant: "cutout" as const, updatedAt: new Date().toISOString() };
+      await pieceStore.put(updated);
+      setPieces((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setStatus("Background removed — original is still saved");
+    } catch {
+      setStatus("Cutout could not be made. The original is safe — try again.");
+    } finally {
+      setProcessing((current) => { const next = { ...current }; delete next[piece.id]; return next; });
+    }
+  }, []);
 
   const addPieces = useCallback(async (incoming: TayloredPiece[]) => {
     const fresh = incoming.filter((piece) => !known.current.has(piece.id));
@@ -36,7 +62,16 @@ export function Board() {
     await pieceStore.putMany(fresh);
     setPieces((current) => [...current, ...fresh]);
     setStatus(`${fresh.length} product${fresh.length === 1 ? "" : "s"} added from the extension`);
-  }, []);
+    for (const piece of fresh) {
+      if (!piece.imageDataUrl) continue;
+      try {
+        const original = await dataUrlToBlob(piece.imageDataUrl);
+        await imageAssetStore.put({ pieceId: piece.id, original, updatedAt: new Date().toISOString() });
+        setAssetUrls((current) => ({ ...current, [piece.id]: { original: piece.imageDataUrl! } }));
+        void processPieceImage(piece);
+      } catch { /* The source image remains available on the piece. */ }
+    }
+  }, [processPieceImage]);
 
   useEffect(() => { pieceStore.list().then(addPieces); }, [addPieces]);
   useEffect(() => {
@@ -49,7 +84,17 @@ export function Board() {
     return () => window.removeEventListener("message", receive);
   }, [addPieces]);
 
-  const files = useMemo<BinaryFiles>(() => Object.fromEntries(pieces.filter((piece) => piece.imageDataUrl?.startsWith("data:" )).map((piece) => [toFileId(piece.id), { id: toFileId(piece.id), dataURL: piece.imageDataUrl as never, mimeType: (piece.imageDataUrl?.slice(5, piece.imageDataUrl.indexOf(";")) || "image/png") as never, created: Date.parse(piece.createdAt), lastRetrieved: Date.now() }])), [pieces]);
+  useEffect(() => { imageAssetStore.list().then(async (assets) => {
+    const entries = await Promise.all(assets.map(async (asset) => [asset.pieceId, { original: await blobToDataUrl(asset.original), cutout: asset.cutout ? await blobToDataUrl(asset.cutout) : undefined }] as const));
+    setAssetUrls(Object.fromEntries(entries));
+  }); }, []);
+
+  const files = useMemo<BinaryFiles>(() => Object.fromEntries(pieces.flatMap((piece) => {
+    const stored = assetUrls[piece.id];
+    const dataURL = piece.imageVariant === "cutout" ? stored?.cutout : stored?.original ?? piece.imageDataUrl;
+    if (!dataURL?.startsWith("data:")) return [];
+    return [[toFileId(piece.id), { id: toFileId(piece.id), dataURL: dataURL as never, mimeType: (dataURL.slice(5, dataURL.indexOf(";")) || "image/png") as never, created: Date.parse(piece.createdAt), lastRetrieved: Date.now() }]];
+  })), [pieces, assetUrls]);
   const elements = useMemo(() => pieces.flatMap(pieceElements), [pieces]);
   useEffect(() => { if (apiRef.current && elements.length) { apiRef.current.addFiles(Object.values(files)); apiRef.current.updateScene({ elements }); } }, [elements, files]);
 
@@ -77,6 +122,12 @@ export function Board() {
   const updateSelectedPiece = async (changes: Partial<TayloredPiece["product"]>) => {
     if (!selectedPiece) return;
     const updated = { ...selectedPiece, updatedAt: new Date().toISOString(), product: { ...selectedPiece.product!, ...changes } };
+    await pieceStore.put(updated);
+    setPieces((current) => current.map((piece) => piece.id === updated.id ? updated : piece));
+  };
+  const setImageVariant = async (variant: "original" | "cutout") => {
+    if (!selectedPiece || (variant === "cutout" && !assetUrls[selectedPiece.id]?.cutout)) return;
+    const updated = { ...selectedPiece, imageVariant: variant, updatedAt: new Date().toISOString() };
     await pieceStore.put(updated);
     setPieces((current) => current.map((piece) => piece.id === updated.id ? updated : piece));
   };
@@ -114,7 +165,7 @@ export function Board() {
         {!pieces.length && <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 w-[430px] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-black/[.08] bg-white/90 p-8 text-center shadow-[0_25px_80px_rgba(43,37,31,.14)] backdrop-blur-xl"><div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-[#ebe1d6] text-[#9a6b58]"><Armchair className="h-6 w-6"/></div><p className="mt-5 text-[10px] font-bold uppercase tracking-[.18em] text-[#9a6b58]">Austin living room</p><h2 className="mt-2 font-serif text-[30px] tracking-tight">Create a room you can actually buy</h2><p className="mx-auto mt-3 max-w-[330px] text-sm leading-6 text-black/50">Drag saved pieces onto the canvas, mix in inspiration, and shape a room that feels unmistakably yours.</p><div className="mt-6 flex justify-center gap-2"><button className="pointer-events-auto rounded-full bg-[#26392f] px-5 py-2.5 text-xs font-semibold text-white">Start with saved pieces</button><button className="pointer-events-auto rounded-full border border-black/10 bg-white px-5 py-2.5 text-xs font-semibold">Upload a room</button></div></div>}
       </section>
 
-      <aside className="w-[238px] shrink-0 border-l border-black/[.07] bg-[#f8f6f1] p-5">{selectedPiece ? <><p className="text-[10px] font-bold uppercase tracking-[.16em] text-[#9a6b58]">Selected piece</p><h3 className="mt-2 font-serif text-xl">Edit product</h3><label className="mt-5 block text-[10px] font-bold uppercase tracking-wider text-black/40">Title<input value={selectedPiece.product?.title ?? ""} onChange={(event) => void updateSelectedPiece({ title: event.target.value })} className="mt-2 w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-xs font-normal normal-case tracking-normal outline-none focus:border-[#9a6b58]"/></label><label className="mt-4 block text-[10px] font-bold uppercase tracking-wider text-black/40">Price<input value={selectedPiece.product?.price ?? ""} onChange={(event) => void updateSelectedPiece({ price: event.target.value })} className="mt-2 w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-xs font-normal normal-case tracking-normal outline-none focus:border-[#9a6b58]"/></label><label className="mt-4 block text-[10px] font-bold uppercase tracking-wider text-black/40">Retailer<input value={selectedPiece.product?.retailer ?? ""} onChange={(event) => void updateSelectedPiece({ retailer: event.target.value })} className="mt-2 w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-xs font-normal normal-case tracking-normal outline-none focus:border-[#9a6b58]"/></label><a href={selectedPiece.product?.sourceUrl} target="_blank" className="mt-5 flex items-center gap-2 text-[11px] font-semibold text-[#58705f]">Open source <ExternalLink className="h-3.5 w-3.5"/></a><button onClick={() => void deleteSelectedPiece()} className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl border border-red-900/10 bg-red-50 px-3 py-2.5 text-xs font-semibold text-red-800"><Trash2 className="h-3.5 w-3.5"/>Remove from board</button></> : <><p className="text-[10px] font-bold uppercase tracking-[.16em] text-black/40">Room overview</p><div className="mt-4 rounded-2xl border border-black/[.07] bg-white p-4"><p className="text-xs font-semibold">Budget</p><div className="mt-3 flex items-end justify-between"><span className="font-serif text-2xl">$4,247</span><span className="text-[10px] text-black/40">of $6,000</span></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#ebe8e2]"><div className="h-full w-[71%] rounded-full bg-[#9a6b58]"/></div><div className="mt-4 flex items-center gap-2 text-[10px] text-[#58705f]"><CircleDollarSign className="h-3.5 w-3.5"/>$1,753 remaining</div></div><div className="mt-5"><div className="flex items-center justify-between"><p className="text-xs font-semibold">Style direction</p><button className="text-[10px] text-black/40">Edit</button></div><div className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-[#e7ded2] px-3 py-1.5 text-[10px]">Warm modern</span><span className="rounded-full bg-[#dfe6df] px-3 py-1.5 text-[10px]">Natural</span><span className="rounded-full bg-[#ebe8e2] px-3 py-1.5 text-[10px]">Soft minimal</span></div></div><div className="mt-7 border-t border-black/[.07] pt-5"><div className="flex items-center gap-2"><PackageOpen className="h-4 w-4 text-[#9a6b58]"/><p className="text-xs font-semibold">{pieces.length || 12} pieces collected</p></div><p className="mt-2 text-[11px] leading-5 text-black/45">Select a piece on the canvas to edit its details.</p></div></>}</aside>
+      <aside className="w-[238px] shrink-0 border-l border-black/[.07] bg-[#f8f6f1] p-5">{selectedPiece ? <><p className="text-[10px] font-bold uppercase tracking-[.16em] text-[#9a6b58]">Selected piece</p><h3 className="mt-2 font-serif text-xl">Edit product</h3><div className="mt-4 rounded-xl border border-black/[.07] bg-white p-2"><p className="px-1 pb-2 text-[10px] font-bold uppercase tracking-wider text-black/40">Product image</p><div className="grid grid-cols-2 gap-1"><button onClick={() => void setImageVariant("original")} className={selectedPiece.imageVariant !== "cutout" ? "flex items-center justify-center gap-1.5 rounded-lg bg-[#26392f] px-2 py-2 text-[10px] font-semibold text-white" : "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[10px] font-semibold text-black/50"}><ImageIcon className="h-3.5 w-3.5"/>Original</button><button disabled={!assetUrls[selectedPiece.id]?.cutout} onClick={() => void setImageVariant("cutout")} className={selectedPiece.imageVariant === "cutout" ? "flex items-center justify-center gap-1.5 rounded-lg bg-[#26392f] px-2 py-2 text-[10px] font-semibold text-white" : "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[10px] font-semibold text-black/50 disabled:opacity-30"}><Scissors className="h-3.5 w-3.5"/>Cutout</button></div><button disabled={Boolean(processing[selectedPiece.id])} onClick={() => void processPieceImage(selectedPiece, true)} className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#ebe1d6] px-2 py-2 text-[10px] font-semibold text-[#795747] disabled:opacity-60"><RefreshCw className={processing[selectedPiece.id] ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"}/>{processing[selectedPiece.id] ?? (assetUrls[selectedPiece.id]?.cutout ? "Remake cutout" : "Remove background")}</button></div><label className="mt-5 block text-[10px] font-bold uppercase tracking-wider text-black/40">Title<input value={selectedPiece.product?.title ?? ""} onChange={(event) => void updateSelectedPiece({ title: event.target.value })} className="mt-2 w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-xs font-normal normal-case tracking-normal outline-none focus:border-[#9a6b58]"/></label><label className="mt-4 block text-[10px] font-bold uppercase tracking-wider text-black/40">Price<input value={selectedPiece.product?.price ?? ""} onChange={(event) => void updateSelectedPiece({ price: event.target.value })} className="mt-2 w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-xs font-normal normal-case tracking-normal outline-none focus:border-[#9a6b58]"/></label><label className="mt-4 block text-[10px] font-bold uppercase tracking-wider text-black/40">Retailer<input value={selectedPiece.product?.retailer ?? ""} onChange={(event) => void updateSelectedPiece({ retailer: event.target.value })} className="mt-2 w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-xs font-normal normal-case tracking-normal outline-none focus:border-[#9a6b58]"/></label><a href={selectedPiece.product?.sourceUrl} target="_blank" className="mt-5 flex items-center gap-2 text-[11px] font-semibold text-[#58705f]">Open source <ExternalLink className="h-3.5 w-3.5"/></a><button onClick={() => void deleteSelectedPiece()} className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl border border-red-900/10 bg-red-50 px-3 py-2.5 text-xs font-semibold text-red-800"><Trash2 className="h-3.5 w-3.5"/>Remove from board</button></> : <><p className="text-[10px] font-bold uppercase tracking-[.16em] text-black/40">Room overview</p><div className="mt-4 rounded-2xl border border-black/[.07] bg-white p-4"><p className="text-xs font-semibold">Budget</p><div className="mt-3 flex items-end justify-between"><span className="font-serif text-2xl">$4,247</span><span className="text-[10px] text-black/40">of $6,000</span></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#ebe8e2]"><div className="h-full w-[71%] rounded-full bg-[#9a6b58]"/></div><div className="mt-4 flex items-center gap-2 text-[10px] text-[#58705f]"><CircleDollarSign className="h-3.5 w-3.5"/>$1,753 remaining</div></div><div className="mt-5"><div className="flex items-center justify-between"><p className="text-xs font-semibold">Style direction</p><button className="text-[10px] text-black/40">Edit</button></div><div className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-[#e7ded2] px-3 py-1.5 text-[10px]">Warm modern</span><span className="rounded-full bg-[#dfe6df] px-3 py-1.5 text-[10px]">Natural</span><span className="rounded-full bg-[#ebe8e2] px-3 py-1.5 text-[10px]">Soft minimal</span></div></div><div className="mt-7 border-t border-black/[.07] pt-5"><div className="flex items-center gap-2"><PackageOpen className="h-4 w-4 text-[#9a6b58]"/><p className="text-xs font-semibold">{pieces.length || 12} pieces collected</p></div><p className="mt-2 text-[11px] leading-5 text-black/45">Select a piece on the canvas to edit its details.</p></div></>}</aside>
     </div>
   </main>;
 }

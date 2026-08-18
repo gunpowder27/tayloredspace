@@ -1,24 +1,40 @@
-import { openDB, type DBSchema } from "idb";
+import Dexie, { type EntityTable } from "dexie";
 import type { TayloredPiece } from "@tayloredspace/domain";
 
-interface TayloredSpaceDB extends DBSchema {
-  pieces: { key: string; value: TayloredPiece; indexes: { "by-board": string } };
+export type PieceImageAsset = {
+  pieceId: string;
+  original: Blob;
+  cutout?: Blob;
+  updatedAt: string;
+};
+
+class TayloredSpaceDatabase extends Dexie {
+  pieces!: EntityTable<TayloredPiece, "id">;
+  imageAssets!: EntityTable<PieceImageAsset, "pieceId">;
+
+  constructor() {
+    super("tayloredspace");
+    this.version(1).stores({ pieces: "id, boardId" });
+    this.version(2).stores({ pieces: "id, boardId", imageAssets: "pieceId" });
+  }
 }
 
-const db = () => openDB<TayloredSpaceDB>("tayloredspace", 1, {
-  upgrade(database) {
-    const pieces = database.createObjectStore("pieces", { keyPath: "id" });
-    pieces.createIndex("by-board", "boardId");
-  },
-});
+const db = new TayloredSpaceDatabase();
 
 export const pieceStore = {
-  async list(boardId = "default") { return (await db()).getAllFromIndex("pieces", "by-board", boardId); },
-  async put(piece: TayloredPiece) { await (await db()).put("pieces", piece); },
-  async putMany(pieces: TayloredPiece[]) {
-    const database = await db();
-    const tx = database.transaction("pieces", "readwrite");
-    await Promise.all([...pieces.map((piece) => tx.store.put(piece)), tx.done]);
+  list(boardId = "default") { return db.pieces.where("boardId").equals(boardId).toArray(); },
+  async put(piece: TayloredPiece) { await db.pieces.put(piece); },
+  async putMany(pieces: TayloredPiece[]) { await db.pieces.bulkPut(pieces); },
+  async remove(id: string) {
+    await db.transaction("rw", db.pieces, db.imageAssets, async () => {
+      await db.pieces.delete(id);
+      await db.imageAssets.delete(id);
+    });
   },
-  async remove(id: string) { await (await db()).delete("pieces", id); },
+};
+
+export const imageAssetStore = {
+  get(pieceId: string) { return db.imageAssets.get(pieceId); },
+  list() { return db.imageAssets.toArray(); },
+  async put(asset: PieceImageAsset) { await db.imageAssets.put(asset); },
 };

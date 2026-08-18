@@ -19,6 +19,8 @@ export type TayloredPiece = {
   createdAt: string;
   updatedAt: string;
   imageDataUrl?: string;
+  imageAssetId?: string;
+  imageVariant?: "original" | "cutout";
   text?: string;
   product?: ProductMetadata;
   position: PiecePosition;
