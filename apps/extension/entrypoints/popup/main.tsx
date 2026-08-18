@@ -5,21 +5,6 @@ import "./style.css";
 
 type PageProduct = { imageUrl?: string; title?: string; price?: string; currency?: string; retailer?: string; sourceUrl: string };
 
-const readProduct = (): PageProduct => {
-  const meta = (property: string) => document.querySelector<HTMLMetaElement>(`meta[property="${property}"], meta[name="${property}"]`)?.content;
-  let product: Record<string, unknown> = {};
-  for (const script of document.querySelectorAll<HTMLScriptElement>('script[type="application/ld+json"]')) {
-    try {
-      const parsed = JSON.parse(script.textContent || "null");
-      const candidates = Array.isArray(parsed) ? parsed : [parsed, ...(parsed?.["@graph"] ?? [])];
-      product = candidates.find((item) => item?.["@type"] === "Product") ?? product;
-    } catch { /* Ignore malformed merchant data. */ }
-  }
-  const offers = Array.isArray(product.offers) ? product.offers[0] : product.offers as Record<string, unknown> | undefined;
-  const image = Array.isArray(product.image) ? product.image[0] : product.image;
-  return { sourceUrl: location.href, imageUrl: String(image || meta("og:image") || ""), title: String(product.name || meta("og:title") || document.title), price: String(offers?.price || meta("product:price:amount") || "") || undefined, currency: String(offers?.priceCurrency || meta("product:price:currency") || "") || undefined, retailer: location.hostname.replace(/^www\./, "") };
-};
-
 async function imageAsDataUrl(url: string) {
   const response = await fetch(url);
   const blob = await response.blob();
@@ -33,8 +18,7 @@ function Popup() {
     try {
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
       if (!tab.id) throw new Error("No active tab");
-      const [{ result: rawResult }] = await browser.scripting.executeScript({ target: { tabId: tab.id }, func: readProduct });
-      const result = rawResult as PageProduct | undefined;
+      const result = await browser.tabs.sendMessage(tab.id, { type: "EXTRACT_PRODUCT" }) as PageProduct | undefined;
       if (!result?.imageUrl) throw new Error("No product image found");
       let imageDataUrl: string | undefined;
       try { imageDataUrl = await imageAsDataUrl(result.imageUrl); } catch { /* The original URL remains useful. */ }

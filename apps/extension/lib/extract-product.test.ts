@@ -1,0 +1,9 @@
+import { JSDOM } from "jsdom";
+import { describe, expect, it } from "vitest";
+import { extractProduct } from "./extract-product";
+const page = (head: string) => new JSDOM(`<!doctype html><html><head>${head}</head><body></body></html>`, { url: "https://shop.example/products/chair?variant=1" }).window.document;
+describe("extractProduct", () => {
+  it("extracts Product JSON-LD and canonical URLs", () => { const document = page(`<link rel="canonical" href="https://shop.example/chair"><script type="application/ld+json">{"@type":"Product","name":"Marlow Chair","image":["https://cdn.example/chair.jpg"],"offers":{"price":"249.00","priceCurrency":"USD"}}</script>`); expect(extractProduct(document)).toMatchObject({ title: "Marlow Chair", imageUrl: "https://cdn.example/chair.jpg", price: "249.00", currency: "USD", sourceUrl: "https://shop.example/chair" }); });
+  it("handles ProductGroup variants and AggregateOffer", () => { const document = page(`<script type="application/ld+json">{"@graph":[{"@type":"ProductGroup","name":"Cloud Sofa","offers":{"lowPrice":1299,"priceCurrency":"USD"},"hasVariant":[{"@type":"Product","name":"Cloud Sofa — Oat","image":{"contentUrl":"https://cdn.example/sofa.jpg"}}]}]}</script>`); expect(extractProduct(document)).toMatchObject({ title: "Cloud Sofa — Oat", imageUrl: "https://cdn.example/sofa.jpg", price: "1299", currency: "USD" }); });
+  it("falls back to Open Graph and ignores malformed JSON-LD", () => { const document = page(`<meta property="og:title" content="Linen Lamp"><meta property="og:image" content="https://cdn.example/lamp.jpg"><meta property="product:price:amount" content="89"><meta property="product:price:currency" content="EUR"><script type="application/ld+json">{broken</script>`); expect(extractProduct(document)).toMatchObject({ title: "Linen Lamp", imageUrl: "https://cdn.example/lamp.jpg", price: "89", currency: "EUR" }); });
+});

@@ -6,6 +6,10 @@ Turn the Phase 0 capture loop into a convincing, editable local-first workspace.
 
 ## Implemented slice
 
+- Dedicated product-page reader injected on retailer pages.
+- JSON-LD support for products, groups, variants, aggregate offers, and price specifications.
+- Open Graph, microdata, canonical URL, and visible-price fallbacks.
+- Automated retailer-markup fixtures for capture regressions.
 - Search and category filters for the saved-piece library.
 - One-click placement of representative saved products onto Excalidraw.
 - Movable and resizable board pieces with positions persisted to IndexedDB.
