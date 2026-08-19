@@ -1,7 +1,7 @@
 import { TAYLOREDSPACE_BRIDGE_EVENT, type ExtensionCapture } from "@tayloredspace/domain";
 
 export default defineContentScript({
-  matches: ["http://localhost:3000/*", "http://127.0.0.1:3000/*"],
+  matches: ["https://tayloredspace.vercel.app/*", "http://localhost:3000/*", "http://127.0.0.1:3000/*"],
   runAt: "document_idle",
   main() {
     const flush = async () => {
