@@ -25,6 +25,8 @@ The first background-removal run downloads the ORMBG model. Later runs reuse bot
 
 For presentations, follow the [five-minute demo runbook](docs/DEMO-READINESS.md). The bounded post-demo milestone is the [Room Mode foundation](docs/ROOM-MODE-NEXT.md).
 
+For alpha testers, use the [Chrome extension installation guide](docs/INSTALL-EXTENSION.md). The public launch target is a Chrome Web Store listing.
+
 ## Quality checks
 
 ```bash
