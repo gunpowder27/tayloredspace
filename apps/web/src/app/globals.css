@@ -8,3 +8,32 @@ button { font: inherit; }
 button { cursor: pointer; }
 .excalidraw .App-menu_top { display: none; }
 .excalidraw .layer-ui__wrapper__footer-center { margin-bottom: 8px; }
+
+@media (max-width: 1279px) {
+  .ts-layout > aside:last-child {
+    width: 100%;
+    border-left: 0;
+    border-top: 1px solid rgb(0 0 0 / 0.07);
+  }
+
+  [aria-label="How TayloredSpace works"] {
+    position: fixed;
+    left: 50%;
+    bottom: 12px;
+    z-index: 40;
+    transform: translateX(-50%);
+    width: min(390px, calc(100vw - 24px));
+    max-height: calc(100vh - 24px);
+  }
+}
+
+@media (max-width: 639px) {
+  .ts-layout > section > .pointer-events-none {
+    width: calc(100vw - 48px);
+    padding: 20px;
+  }
+
+  .ts-layout > section > .pointer-events-none h2 {
+    font-size: 24px;
+  }
+}
