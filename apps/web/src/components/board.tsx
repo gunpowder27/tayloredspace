@@ -5,7 +5,7 @@ import type { AppState, BinaryFiles, ExcalidrawImperativeAPI } from "@excalidraw
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import { captureToPiece, TAYLOREDSPACE_BRIDGE_EVENT, type ExtensionCapture, type TayloredPiece } from "@tayloredspace/domain";
 import { imageAssetStore, pieceStore } from "@tayloredspace/persistence";
-import { ArrowRight, Armchair, Check, ChevronDown, ChevronUp, CircleDollarSign, ExternalLink, Grid2X2, ImageIcon, ImagePlus, Layers3, Link2, PackageOpen, Plus, RefreshCw, Scissors, Search, Trash2, WandSparkles, X } from "lucide-react";
+import { ArrowRight, Armchair, Check, ChevronDown, ChevronUp, CircleDollarSign, ExternalLink, Grid2X2, ImageIcon, ImagePlus, Layers3, Link2, PackageOpen, Pencil, Plus, RefreshCw, Scissors, Search, Trash2, WandSparkles, X } from "lucide-react";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { removeImageBackground, warmImageBackgroundRemoval } from "../lib/background-removal";
@@ -39,6 +39,8 @@ export function Board() {
   const [extensionHelpOpen, setExtensionHelpOpen] = useState(false);
   const [toolbarOpen, setToolbarOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [roomName, setRoomName] = useState("Taylor’s living room");
+  const [editingRoomName, setEditingRoomName] = useState(false);
 
   const processPieceImage = useCallback(async (piece: TayloredPiece, force = false) => {
     if (!piece.imageDataUrl && !piece.imageAssetId) return;
@@ -92,6 +94,7 @@ export function Board() {
     setPieces(stored);
   }); }, []);
   useEffect(() => { warmImageBackgroundRemoval(); }, []);
+  useEffect(() => { const savedRoomName = window.localStorage.getItem("tayloredspace-room-name"); if (savedRoomName) setRoomName(savedRoomName); }, []);
   useEffect(() => { setConfirmDelete(false); }, [selectedPieceId]);
   useEffect(() => {
     const receive = (event: MessageEvent<{ type?: string; capture?: ExtensionCapture }>) => {
@@ -199,12 +202,19 @@ export function Board() {
   const spent = pieces.reduce((total, piece) => total + Number((piece.product?.price ?? "").replace(/[^0-9.]/g, "") || 0), 0);
   const remaining = Math.max(0, budget - spent);
   const budgetPercent = Math.min(100, Math.round((spent / budget) * 100));
+  const saveRoomName = () => {
+    const nextName = roomName.trim() || "Taylor’s living room";
+    setRoomName(nextName);
+    window.localStorage.setItem("tayloredspace-room-name", nextName);
+    setEditingRoomName(false);
+    setStatus(`Room renamed to ${nextName}`);
+  };
 
   return <main className="flex min-h-screen flex-col overflow-x-hidden bg-[#eeebe4] text-[#24221f] lg:h-screen lg:overflow-hidden">
     <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(event) => { void addUpload(event.target.files?.[0]); event.currentTarget.value = ""; }}/>
     <header className="flex min-h-[72px] shrink-0 flex-wrap items-center justify-between gap-3 border-b border-black/[.07] bg-[#f8f6f1] px-4 py-3 sm:px-5">
       <div className="flex items-center gap-3 lg:w-[278px] lg:border-r lg:border-black/[.07]"><div className="relative h-10 w-12 overflow-hidden sm:h-11 sm:w-14"><Image src="/tayloredspace-logo-v2.png" alt="TayloredSpace TS swallow" fill sizes="56px" priority className="object-contain"/></div><div><h1 className="font-serif text-[19px] leading-none tracking-tight sm:text-[21px]">TayloredSpace</h1><p className="mt-1.5 hidden text-[10px] font-semibold uppercase tracking-[.17em] text-[#9a6b58] sm:block">Design what feels like you</p></div></div>
-      <div className="flex min-w-0 items-center gap-2 lg:flex-1 lg:justify-between lg:pl-6"><div className="hidden text-sm font-semibold lg:block">Austin living room</div><div className="flex items-center gap-2 sm:gap-3"><div role="status" className="hidden max-w-[310px] items-center gap-2 truncate rounded-full bg-[#e9efe9] px-3 py-2 text-[11px] font-medium text-[#4b6354] md:flex"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#66866f]"/>{status}</div><button onClick={() => { setTourStep(0); setTourOpen(true); setExtensionHelpOpen(false); }} className="flex items-center gap-2 rounded-full border border-[#9a6b58]/20 bg-[#f4ece4] px-3 py-2 text-[11px] font-semibold text-[#795747] sm:px-4 sm:text-xs"><WandSparkles className="h-3.5 w-3.5"/>How it works</button><button onClick={() => void sharePreview()} className="hidden rounded-full border border-black/10 bg-white px-4 py-2 text-xs font-semibold shadow-sm sm:block">Copy app link</button></div></div>
+      <div className="flex min-w-0 items-center gap-2 lg:flex-1 lg:justify-between lg:pl-6"><div className="hidden min-w-0 lg:block">{editingRoomName ? <input autoFocus value={roomName} onChange={(event) => setRoomName(event.target.value)} onBlur={saveRoomName} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} aria-label="Room name" className="w-[190px] rounded-lg border border-[#9a6b58]/30 bg-white px-3 py-2 text-sm font-semibold outline-none focus:border-[#9a6b58]"/> : <button onClick={() => setEditingRoomName(true)} className="flex max-w-[210px] items-center gap-2 rounded-lg px-2 py-2 text-left text-sm font-semibold hover:bg-black/[.04]" title="Rename this room"><span className="truncate">{roomName}</span><Pencil className="h-3.5 w-3.5 shrink-0 text-black/35"/></button>}</div><div className="flex items-center gap-2 sm:gap-3"><div role="status" className="hidden max-w-[310px] items-center gap-2 truncate rounded-full bg-[#e9efe9] px-3 py-2 text-[11px] font-medium text-[#4b6354] md:flex"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#66866f]"/>{status}</div><button onClick={() => { setTourStep(0); setTourOpen(true); setExtensionHelpOpen(false); }} className="flex items-center gap-2 rounded-full border border-[#9a6b58]/20 bg-[#f4ece4] px-3 py-2 text-[11px] font-semibold text-[#795747] sm:px-4 sm:text-xs"><WandSparkles className="h-3.5 w-3.5"/>How it works</button><button onClick={() => void sharePreview()} className="hidden rounded-full border border-black/10 bg-white px-4 py-2 text-xs font-semibold shadow-sm sm:block">Copy app link</button></div></div>
     </header>
 
     <div className="ts-layout flex min-h-0 flex-1 flex-col lg:flex-row">
