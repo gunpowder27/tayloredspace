@@ -9,7 +9,7 @@ button { cursor: pointer; }
 .excalidraw .App-menu_top { display: none; }
 .excalidraw .layer-ui__wrapper__footer-center { margin-bottom: 8px; }
 
-@media (max-width: 1279px) {
+@media (max-width: 1023px) {
   .ts-layout > aside:last-child {
     width: 100%;
     border-left: 0;
