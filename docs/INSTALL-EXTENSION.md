@@ -4,7 +4,7 @@ TayloredSpace is currently distributed as a private alpha package. Chrome does n
 
 ## Install
 
-1. Download `TayloredSpace-v0.1.0-alpha.2-Chrome.zip` from the [Alpha 2 release](https://github.com/gunpowder27/tayloredspace/releases/tag/v0.1.0-alpha.2).
+1. Download `TayloredSpace-v0.1.0-alpha.3-Chrome.zip` from the [Alpha 3 release](https://github.com/gunpowder27/tayloredspace/releases/tag/v0.1.0-alpha.3).
 2. Double-click the ZIP to unzip it.
 3. In Chrome, open `chrome://extensions`.
 4. Turn on **Developer mode** in the upper-right corner.
