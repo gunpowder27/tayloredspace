@@ -21,7 +21,6 @@ button { cursor: pointer; }
     left: 50%;
     bottom: 12px;
     z-index: 40;
-    transform: translateX(-50%);
     width: min(390px, calc(100vw - 24px));
     max-height: calc(100vh - 24px);
   }
