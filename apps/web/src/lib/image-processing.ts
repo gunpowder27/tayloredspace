@@ -21,6 +21,66 @@ export async function resizeForRemoval(source: Blob, maxDimension = 1024) {
   return pica().toBlob(canvas, "image/png", 0.95);
 }
 
+export type RemovalFrame = {
+  originalWidth: number;
+  originalHeight: number;
+  paddedSize: number;
+  cropX: number;
+  cropY: number;
+  cropWidth: number;
+  cropHeight: number;
+};
+
+/**
+ * Most background-removal models operate on square images.  Pad the image
+ * ourselves, then retain the exact crop metadata so the cutout can be placed
+ * back into the original frame without stretching its subject.
+ */
+export async function prepareImageForRemoval(source: Blob, maxDimension = 1024): Promise<{ blob: Blob; frame: RemovalFrame }> {
+  const bitmap = await createImageBitmap(source);
+  const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+  const cropWidth = Math.max(1, Math.round(bitmap.width * scale));
+  const cropHeight = Math.max(1, Math.round(bitmap.height * scale));
+  const paddedSize = Math.max(cropWidth, cropHeight);
+  const cropX = Math.floor((paddedSize - cropWidth) / 2);
+  const cropY = Math.floor((paddedSize - cropHeight) / 2);
+  const canvas = document.createElement("canvas");
+  canvas.width = paddedSize;
+  canvas.height = paddedSize;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not prepare image for background removal");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, paddedSize, paddedSize);
+  context.drawImage(bitmap, cropX, cropY, cropWidth, cropHeight);
+  const frame = { originalWidth: bitmap.width, originalHeight: bitmap.height, paddedSize, cropX, cropY, cropWidth, cropHeight };
+  bitmap.close();
+  return { blob: await pica().toBlob(canvas, "image/png", 0.95), frame };
+}
+
+export async function restoreCutoutFrame(cutout: Blob, frame: RemovalFrame) {
+  const bitmap = await createImageBitmap(cutout);
+  const scaleX = bitmap.width / frame.paddedSize;
+  const scaleY = bitmap.height / frame.paddedSize;
+  const canvas = document.createElement("canvas");
+  canvas.width = frame.originalWidth;
+  canvas.height = frame.originalHeight;
+  const context = canvas.getContext("2d");
+  if (!context) return cutout;
+  context.drawImage(
+    bitmap,
+    Math.round(frame.cropX * scaleX),
+    Math.round(frame.cropY * scaleY),
+    Math.round(frame.cropWidth * scaleX),
+    Math.round(frame.cropHeight * scaleY),
+    0,
+    0,
+    frame.originalWidth,
+    frame.originalHeight,
+  );
+  bitmap.close();
+  return pica().toBlob(canvas, "image/png", 0.95);
+}
+
 export async function trimTransparentEdges(source: Blob, padding = 8) {
   const bitmap = await createImageBitmap(source);
   const canvas = document.createElement("canvas");

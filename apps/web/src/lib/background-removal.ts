@@ -1,4 +1,4 @@
-import { resizeForRemoval } from "./image-processing";
+import { prepareImageForRemoval, restoreCutoutFrame } from "./image-processing";
 
 type WorkerResponse = { id: string; type: "progress" | "complete" | "error"; buffer?: ArrayBuffer; message?: string; progress?: { status?: string; progress?: number } };
 
@@ -46,14 +46,14 @@ export function warmImageBackgroundRemoval() {
 
 export async function removeImageBackground(source: Blob, onProgress?: (label: string) => void) {
   onProgress?.("Preparing image…");
-  const resized = await resizeForRemoval(source);
-  const buffer = await resized.arrayBuffer();
+  const prepared = await prepareImageForRemoval(source);
+  const buffer = await prepared.blob.arrayBuffer();
   const id = crypto.randomUUID();
   const worker = getWorker();
   const cutout = await new Promise<Blob>((resolve, reject) => {
     pendingRemovals.set(id, { resolve, reject, onProgress });
-    worker.postMessage({ id, buffer, mimeType: resized.type || "image/png" }, [buffer]);
+    worker.postMessage({ id, buffer, mimeType: prepared.blob.type || "image/png" }, [buffer]);
   });
   onProgress?.("Finishing cutout…");
-  return cutout;
+  return restoreCutoutFrame(cutout, prepared.frame);
 }
