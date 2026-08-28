@@ -42,6 +42,7 @@ export function Board() {
   const [roomName, setRoomName] = useState("Taylor’s living room");
   const [editingRoomName, setEditingRoomName] = useState(false);
   const [draggingPieceId, setDraggingPieceId] = useState<string>();
+  const [sceneRevision, setSceneRevision] = useState(0);
 
   const processPieceImage = useCallback(async (piece: TayloredPiece, force = false) => {
     if (!piece.imageDataUrl && !piece.imageAssetId) return;
@@ -127,7 +128,9 @@ export function Board() {
   })), [pieces, assetUrls]);
   const boardPieces = useMemo(() => pieces.filter((piece) => piece.onBoard !== false), [pieces]);
   const elements = useMemo(() => boardPieces.flatMap(pieceElements), [boardPieces]);
-  const sceneKey = useMemo(() => boardPieces.map((piece) => [piece.id, piece.imageVariant, piece.position.x, piece.position.y, piece.position.width, piece.position.height, assetUrls[piece.id]?.original ? "original-ready" : "", assetUrls[piece.id]?.cutout ? "cutout-ready" : ""].join(":" )).join("|"), [boardPieces, assetUrls]);
+  // Positions intentionally stay out of this key. Including them remounts the
+  // canvas during the first pixel of a drag and makes pieces feel stationary.
+  const sceneKey = useMemo(() => `${sceneRevision}:${boardPieces.map((piece) => [piece.id, piece.imageVariant, assetUrls[piece.id]?.original ? "original-ready" : "", assetUrls[piece.id]?.cutout ? "cutout-ready" : ""].join(":" )).join("|")}`, [boardPieces, assetUrls, sceneRevision]);
 
   const products = [
     { name: "Lennon sofa", price: "$1,899", category: "Seating", retailer: "Demo collection", image: "/demo/lennon-sofa.jpg" },
@@ -234,6 +237,7 @@ export function Board() {
     const updated = { ...piece, onBoard: true, position, updatedAt: new Date().toISOString() };
     await pieceStore.put(updated);
     setPieces((current) => current.map((item) => item.id === updated.id ? updated : item));
+    if (piece.onBoard !== false) setSceneRevision((current) => current + 1);
     setSelectedPieceId(updated.id);
     setStatus("Piece placed on your board");
   };
