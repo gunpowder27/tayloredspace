@@ -5,7 +5,7 @@ import type { AppState, BinaryFiles, ExcalidrawImperativeAPI } from "@excalidraw
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import { captureToPiece, TAYLOREDSPACE_BRIDGE_ACK_EVENT, TAYLOREDSPACE_BRIDGE_EVENT, TAYLOREDSPACE_BRIDGE_READY_EVENT, type ExtensionCapture, type TayloredPiece } from "@tayloredspace/domain";
 import { imageAssetStore, pieceStore } from "@tayloredspace/persistence";
-import { ArrowRight, Armchair, Check, ChevronDown, ChevronUp, CircleDollarSign, ExternalLink, Grid2X2, ImageIcon, ImagePlus, Layers3, Link2, PackageOpen, Pencil, Plus, RefreshCw, Scissors, Search, Trash2, WandSparkles, X } from "lucide-react";
+import { ArrowRight, Armchair, BringToFront, Check, CircleDollarSign, Copy, Crop, ExternalLink, FlipHorizontal, ImageIcon, ImagePlus, Link2, PackageOpen, Pencil, Plus, RefreshCw, RotateCw, Scissors, Search, SendToBack, Trash2, WandSparkles, X } from "lucide-react";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { removeImageBackground, warmImageBackgroundRemoval } from "../lib/background-removal";
@@ -16,7 +16,7 @@ const pieceElements = (piece: TayloredPiece): ExcalidrawElement[] => {
   const x = piece.position.x;
   const y = piece.position.y;
   const elements = convertToExcalidrawElements([
-    { id: `piece-image-${piece.id}`, type: "image", x, y, width: piece.position.width, height: piece.position.height, fileId: toFileId(piece.id, piece.imageVariant), customData: { pieceId: piece.id, product: piece.product } },
+    { id: `piece-image-${piece.id}`, type: "image", x, y, width: piece.position.width, height: piece.position.height, angle: piece.rotation ?? 0, scale: [piece.flipX ? -1 : 1, piece.flipY ? -1 : 1], crop: piece.crop ?? null, fileId: toFileId(piece.id, piece.imageVariant), customData: { pieceId: piece.id, product: piece.product } },
     { id: `piece-label-${piece.id}`, type: "text", x, y: y + piece.position.height + 14, text: [piece.product?.title, piece.product?.price].filter(Boolean).join(" · ") || "Saved product", fontSize: 18, strokeColor: "#28241f", customData: { pieceId: piece.id } },
   ]);
   return elements as ExcalidrawElement[];
@@ -37,7 +37,7 @@ export function Board() {
   const [tourOpen, setTourOpen] = useState(false);
   const [tourStep, setTourStep] = useState(0);
   const [extensionHelpOpen, setExtensionHelpOpen] = useState(false);
-  const [toolbarOpen, setToolbarOpen] = useState(false);
+  const [copiedPieceId, setCopiedPieceId] = useState<string>();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [roomName, setRoomName] = useState("Taylor’s living room");
   const [editingRoomName, setEditingRoomName] = useState(false);
@@ -126,7 +126,7 @@ export function Board() {
     const fileId = toFileId(piece.id, piece.imageVariant);
     return [[fileId, { id: fileId, dataURL: dataURL as never, mimeType: (dataURL.slice(5, dataURL.indexOf(";")) || "image/png") as never, created: Date.parse(piece.createdAt), lastRetrieved: Date.now() }]];
   })), [pieces, assetUrls]);
-  const boardPieces = useMemo(() => pieces.filter((piece) => piece.onBoard !== false), [pieces]);
+  const boardPieces = useMemo(() => pieces.filter((piece) => piece.onBoard !== false).sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)), [pieces]);
   const elements = useMemo(() => boardPieces.flatMap(pieceElements), [boardPieces]);
   // Positions intentionally stay out of this key. Including them remounts the
   // canvas during the first pixel of a drag and makes pieces feel stationary.
@@ -137,7 +137,8 @@ export function Board() {
     { name: "Travertine table", price: "$649", category: "Tables", retailer: "Demo collection", image: "/demo/travertine-table.jpg" },
     { name: "Bouclé chair", price: "$849", category: "Seating", retailer: "Demo collection", image: "/demo/boucle-chair.jpg" },
   ];
-  const visiblePieces = pieces.filter((piece) => {
+  const savedPieces = pieces.filter((piece) => !piece.isBoardDuplicate);
+  const visiblePieces = savedPieces.filter((piece) => {
     const title = piece.product?.title ?? piece.text ?? "Saved piece";
     return (category === "All" || (category === "Seating" && /chair|sofa|seat/i.test(title)) || (category === "Tables" && /table|desk|nightstand/i.test(title))) && title.toLowerCase().includes(query.toLowerCase());
   });
@@ -213,7 +214,7 @@ export function Board() {
     setStatus("Image added — drag it anywhere on the board");
   };
   const budget = 6000;
-  const spent = pieces.reduce((total, piece) => total + Number((piece.product?.price ?? "").replace(/[^0-9.]/g, "") || 0), 0);
+  const spent = savedPieces.reduce((total, piece) => total + Number((piece.product?.price ?? "").replace(/[^0-9.]/g, "") || 0), 0);
   const remaining = Math.max(0, budget - spent);
   const budgetPercent = Math.min(100, Math.round((spent / budget) * 100));
   const saveRoomName = () => {
@@ -222,6 +223,37 @@ export function Board() {
     window.localStorage.setItem("tayloredspace-room-name", nextName);
     setEditingRoomName(false);
     setStatus(`Room renamed to ${nextName}`);
+  };
+  const updateBoardAppearance = async (changes: Partial<TayloredPiece>) => {
+    if (!selectedPiece) return;
+    const updated = { ...selectedPiece, ...changes, updatedAt: new Date().toISOString() };
+    await pieceStore.put(updated);
+    setPieces((current) => current.map((piece) => piece.id === updated.id ? updated : piece));
+    setSceneRevision((current) => current + 1);
+  };
+  const duplicatePiece = async (source: TayloredPiece) => {
+    const now = new Date().toISOString();
+    const duplicate: TayloredPiece = { ...source, id: crypto.randomUUID(), createdAt: now, updatedAt: now, onBoard: true, isBoardDuplicate: true, position: { ...source.position, x: source.position.x + 36, y: source.position.y + 36 }, zIndex: Math.max(0, ...boardPieces.map((piece) => piece.zIndex ?? 0)) + 1 };
+    const asset = await imageAssetStore.get(source.id);
+    if (asset) await imageAssetStore.put({ ...asset, pieceId: duplicate.id, updatedAt: now });
+    known.current.add(duplicate.id);
+    await pieceStore.put(duplicate);
+    setAssetUrls((current) => ({ ...current, [duplicate.id]: current[source.id] ?? (source.imageDataUrl ? { original: source.imageDataUrl } : { original: "" }) }));
+    setPieces((current) => [...current, duplicate]);
+    setSelectedPieceId(duplicate.id);
+    setStatus("Duplicate placed on your board");
+  };
+  const copySelectedPiece = () => {
+    if (!selectedPiece) return;
+    setCopiedPieceId(selectedPiece.id);
+    setStatus("Piece copied — choose Paste to add another instance");
+  };
+  const pasteCopiedPiece = () => {
+    const source = pieces.find((piece) => piece.id === copiedPieceId);
+    if (source) void duplicatePiece(source);
+  };
+  const startCrop = () => {
+    setStatus("Double-click the image, then drag its crop handles. Your crop saves automatically.");
   };
   const placePieceAt = async (pieceId: string, clientX: number, clientY: number) => {
     const piece = pieces.find((item) => item.id === pieceId);
@@ -252,7 +284,7 @@ export function Board() {
     <div className="ts-layout flex min-h-0 flex-1 flex-col lg:flex-row">
       <aside className="flex w-full shrink-0 flex-col border-b border-black/[.07] bg-[#f8f6f1] lg:w-[298px] lg:border-b-0 lg:border-r">
         <div className="p-5 pb-3"><div className="mb-4 flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[.16em] text-black/40">Your collection</p><h2 className="mt-1 font-serif text-[24px]">Saved pieces</h2></div><button onClick={() => fileInputRef.current?.click()} aria-label="Upload an image" title="Upload an image" className="grid h-9 w-9 place-items-center rounded-full bg-[#26392f] text-white"><Plus className="h-4 w-4"/></button></div><label className="flex items-center gap-2 rounded-xl border border-black/[.08] bg-white px-3 py-2.5 text-xs text-black/40"><Search className="h-4 w-4"/><input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search saved pieces" className="w-full bg-transparent outline-none" placeholder="Search furniture, lighting…"/></label></div>
-        <div className="flex gap-2 overflow-hidden px-5 py-2 text-[11px]">{["All","Seating","Tables"].map((item) => <button key={item} onClick={() => setCategory(item)} className={category === item ? "rounded-full bg-[#26392f] px-3 py-1.5 text-white" : "rounded-full border border-black/10 bg-white px-3 py-1.5"}>{item}{item === "All" ? ` ${pieces.length}` : ""}</button>)}</div>
+        <div className="flex gap-2 overflow-hidden px-5 py-2 text-[11px]">{["All","Seating","Tables"].map((item) => <button key={item} onClick={() => setCategory(item)} className={category === item ? "rounded-full bg-[#26392f] px-3 py-1.5 text-white" : "rounded-full border border-black/10 bg-white px-3 py-1.5"}>{item}{item === "All" ? ` ${savedPieces.length}` : ""}</button>)}</div>
         <div className="grid grid-cols-2 gap-3 overflow-y-auto p-5 pt-3 sm:grid-cols-4 lg:grid-cols-2">
           {visiblePieces.map((piece) => { const title = piece.product?.title ?? piece.text ?? "Saved piece"; const thumbnail = assetUrls[piece.id]?.original ?? piece.imageDataUrl; return <button onPointerDown={(event) => { if (event.button !== 0) return; setDraggingPieceId(piece.id); setSelectedPieceId(piece.id); }} onPointerUp={() => setDraggingPieceId(undefined)} onClick={() => setSelectedPieceId(piece.id)} key={piece.id} className="group cursor-grab touch-none overflow-hidden rounded-2xl border border-black/[.07] bg-white text-left shadow-[0_5px_18px_rgba(46,39,31,.05)] active:cursor-grabbing"><div className="relative aspect-square overflow-hidden bg-[#e7e1d8]">{thumbnail ? <img src={thumbnail} alt={title} draggable={false} className="h-full w-full object-contain transition duration-300 group-hover:scale-105"/> : <PackageOpen className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 text-black/25"/>}</div><div className="p-2.5"><p className="truncate text-[11px] font-semibold">{title}</p><div className="mt-1 flex items-center justify-between"><p className="truncate text-[10px] text-black/45">{piece.product?.price ?? piece.product?.retailer ?? "Saved"}</p><span className="text-[9px] font-bold uppercase tracking-wide text-[#795747]">Drag to board</span></div></div></button>; })}
           <button onClick={() => fileInputRef.current?.click()} className="grid aspect-[.78] place-items-center rounded-2xl border border-dashed border-black/15 bg-white/45 text-center"><div><ImagePlus className="mx-auto h-5 w-5 text-black/35"/><p className="mt-2 text-[10px] font-semibold text-black/45">Upload inspiration</p></div></button>
@@ -263,9 +295,9 @@ export function Board() {
       <section className="relative h-[68vh] min-h-[520px] min-w-0 flex-1 bg-[#dedbd3] p-3 sm:p-4 lg:h-auto lg:min-h-0">
         {Object.keys(processing).length > 0 && !tourOpen && <div className="absolute right-8 top-24 z-40 flex w-[290px] items-center gap-3 rounded-2xl border border-[#9a6b58]/15 bg-white/95 p-4 shadow-[0_16px_50px_rgba(52,46,38,.16)] backdrop-blur"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#f1e8df] text-[#9a6b58]"><RefreshCw className="h-4 w-4 animate-spin"/></span><div><p className="text-xs font-bold">Creating a clean cutout</p><p className="mt-1 text-[10px] leading-4 text-black/45">{Object.values(processing)[0]} First use takes longer; the model stays cached afterward.</p></div></div>}
         {tourOpen && <div role="dialog" aria-label="How TayloredSpace works" className="absolute bottom-8 left-1/2 z-40 w-[390px] -translate-x-1/2 overflow-hidden rounded-[24px] border border-black/10 bg-[#26392f] text-white shadow-[0_24px_80px_rgba(25,31,27,.3)]"><div className="flex items-start justify-between px-6 pt-5"><div><p className="text-[10px] font-bold uppercase tracking-[.18em] text-[#dec8a5]">Step {tourStep + 1} of 3</p><h3 className="mt-2 font-serif text-[24px]">{["Add one piece", "We make the cutout", "Move it into place"][tourStep]}</h3></div><button onClick={() => setTourOpen(false)} aria-label="Close how it works" className="rounded-full p-1 text-white/55 hover:bg-white/10 hover:text-white"><X className="h-4 w-4"/></button></div><p className="px-6 pt-2 text-[12px] leading-5 text-white/70">{[hasDemoPiece ? "We found your demo piece. Press the button to continue with it." : "Press the button below. We will add one chair so you can see the whole flow.", "Your first cutout can take about a minute. Keep this tab open; your photo stays on this device. You can always keep the original.", "Click the chair, then drag it. The simple panel on the right switches between Original and Cutout."][tourStep]}</p><div className="mt-5 flex items-center justify-between border-t border-white/10 px-6 py-4"><div className="flex gap-1.5">{[0,1,2].map((step) => <span key={step} className={step <= tourStep ? "h-1.5 w-7 rounded-full bg-[#dec8a5]" : "h-1.5 w-7 rounded-full bg-white/15"}/>)}</div>{tourStep === 0 ? <button onClick={() => void startGuidedDemo()} className="flex items-center gap-2 rounded-full bg-[#dec8a5] px-4 py-2 text-[11px] font-bold text-[#26392f]">Add demo chair <ArrowRight className="h-3.5 w-3.5"/></button> : tourStep === 1 ? <span className="flex items-center gap-2 text-[11px] font-semibold text-[#dec8a5]"><RefreshCw className="h-3.5 w-3.5 animate-spin"/>{Object.values(processing)[0] ?? "Making cutout…"}</span> : <button onClick={() => setTourOpen(false)} className="flex items-center gap-2 rounded-full bg-[#dec8a5] px-4 py-2 text-[11px] font-bold text-[#26392f]"><Check className="h-3.5 w-3.5"/>Got it</button>}</div></div>}
-        <div className="absolute left-6 top-6 z-20 rounded-xl border border-black/[.08] bg-white/95 p-1.5 shadow-[0_8px_30px_rgba(42,37,31,.12)] backdrop-blur"><div className="flex items-center gap-1"><button className="flex items-center gap-2 rounded-lg bg-[#f0eee9] px-3 py-2 text-[11px] font-semibold"><Grid2X2 className="h-3.5 w-3.5"/>Board</button>{toolbarOpen && <><button disabled title="Coming in the next phase" className="flex cursor-not-allowed items-center gap-2 rounded-lg px-3 py-2 text-[11px] text-black/30"><Layers3 className="h-3.5 w-3.5"/>Room view · next</button><span className="mx-1 h-5 w-px bg-black/10"/><span className="px-2 text-[10px] text-black/40">Select · drag · resize</span></>}<button onClick={() => setToolbarOpen((open) => !open)} aria-label={toolbarOpen ? "Minimize board toolbar" : "Expand board toolbar"} title={toolbarOpen ? "Minimize" : "Show board options"} className="grid h-8 w-8 place-items-center rounded-lg text-black/45 hover:bg-black/5">{toolbarOpen ? <ChevronUp className="h-3.5 w-3.5"/> : <ChevronDown className="h-3.5 w-3.5"/>}</button></div></div>
+        {selectedPiece && selectedPiece.onBoard !== false && <div className="absolute left-1/2 top-5 z-30 flex max-w-[calc(100%-32px)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-xl border border-black/[.09] bg-white/95 p-1.5 shadow-[0_10px_32px_rgba(42,37,31,.16)] backdrop-blur"><button onClick={copySelectedPiece} title="Copy" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-black/[.05]"><Copy className="h-4 w-4"/></button><button disabled={!copiedPieceId} onClick={pasteCopiedPiece} title="Paste another instance" className="rounded-lg px-2 py-1.5 text-[11px] font-semibold hover:bg-black/[.05] disabled:opacity-30">Paste</button><button onClick={() => void duplicatePiece(selectedPiece)} title="Duplicate" className="rounded-lg px-2 py-1.5 text-[11px] font-semibold hover:bg-black/[.05]">Duplicate</button><span className="mx-1 h-5 w-px bg-black/10"/><button onClick={() => void updateBoardAppearance({ rotation: (selectedPiece.rotation ?? 0) + Math.PI / 2 })} title="Rotate 90 degrees" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-black/[.05]"><RotateCw className="h-4 w-4"/></button><button onClick={() => void updateBoardAppearance({ flipX: !selectedPiece.flipX })} title="Flip horizontally" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-black/[.05]"><FlipHorizontal className="h-4 w-4"/></button><button onClick={startCrop} title="Crop (or double-click the image)" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-black/[.05]"><Crop className="h-4 w-4"/></button><span className="mx-1 h-5 w-px bg-black/10"/><button onClick={() => void updateBoardAppearance({ zIndex: Math.min(...boardPieces.map((piece) => piece.zIndex ?? 0)) - 1 })} title="Send to back" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-black/[.05]"><SendToBack className="h-4 w-4"/></button><button onClick={() => void updateBoardAppearance({ zIndex: Math.max(...boardPieces.map((piece) => piece.zIndex ?? 0)) + 1 })} title="Bring to front" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-black/[.05]"><BringToFront className="h-4 w-4"/></button></div>}
         <div onPointerUpCapture={(event: ReactPointerEvent<HTMLDivElement>) => { if (draggingPieceId) { void placePieceAt(draggingPieceId, event.clientX, event.clientY); setDraggingPieceId(undefined); } }} onPointerCancel={() => setDraggingPieceId(undefined)} className="h-full overflow-hidden rounded-[22px] border border-black/[.08] bg-[#f9f8f5] shadow-[0_16px_50px_rgba(52,46,38,.08)]">
-          <Excalidraw key={sceneKey} onChange={(sceneElements: readonly ExcalidrawElement[], appState: AppState) => { const selected = sceneElements.find((element) => appState.selectedElementIds[element.id])?.customData?.pieceId as string | undefined; if (selected) setSelectedPieceId(selected); const moved = sceneElements.flatMap((element) => { const pieceId = element.customData?.pieceId as string | undefined; if (!pieceId || element.type !== "image") return []; const piece = pieces.find((item) => item.id === pieceId); if (!piece || (piece.position.x === element.x && piece.position.y === element.y && piece.position.width === element.width && piece.position.height === element.height)) return []; return [{ piece, position: { x: element.x, y: element.y, width: element.width, height: element.height } }]; }); if (moved.length) { setStatus("Piece moved — your board is saved"); setPieces((current) => current.map((piece) => { const change = moved.find((item) => item.piece.id === piece.id); return change ? { ...piece, position: change.position } : piece; })); moved.forEach(({ piece, position }) => { void pieceStore.put({ ...piece, updatedAt: new Date().toISOString(), position }); }); } }} excalidrawAPI={(api: ExcalidrawImperativeAPI) => { apiRef.current = api; }} initialData={{ elements, files, appState: { viewBackgroundColor: "#f9f8f5" } }} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false} }}/>
+          <Excalidraw key={sceneKey} onChange={(sceneElements: readonly ExcalidrawElement[], appState: AppState) => { const selected = sceneElements.find((element) => appState.selectedElementIds[element.id])?.customData?.pieceId as string | undefined; if (selected) setSelectedPieceId(selected); const changed = sceneElements.flatMap((element, zIndex) => { const pieceId = element.customData?.pieceId as string | undefined; if (!pieceId || element.type !== "image") return []; const piece = pieces.find((item) => item.id === pieceId); if (!piece) return []; const crop = element.crop ? { ...element.crop } : null; const update = { position: { x: element.x, y: element.y, width: element.width, height: element.height }, rotation: element.angle, flipX: element.scale[0] < 0, flipY: element.scale[1] < 0, crop, zIndex }; if (piece.position.x === update.position.x && piece.position.y === update.position.y && piece.position.width === update.position.width && piece.position.height === update.position.height && piece.rotation === update.rotation && Boolean(piece.flipX) === update.flipX && Boolean(piece.flipY) === update.flipY && JSON.stringify(piece.crop ?? null) === JSON.stringify(crop) && piece.zIndex === zIndex) return []; return [{ piece, update }]; }); if (changed.length) { setStatus("Piece updated — your board is saved"); setPieces((current) => current.map((piece) => { const change = changed.find((item) => item.piece.id === piece.id); return change ? { ...piece, ...change.update } : piece; })); changed.forEach(({ piece, update }) => { void pieceStore.put({ ...piece, ...update, updatedAt: new Date().toISOString() }); }); } }} excalidrawAPI={(api: ExcalidrawImperativeAPI) => { apiRef.current = api; }} initialData={{ elements, files, appState: { viewBackgroundColor: "#f9f8f5" } }} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false} }}/>
         </div>
         {!boardPieces.length && !tourOpen && <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 w-[410px] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-black/[.08] bg-white/90 p-8 text-center shadow-[0_25px_80px_rgba(43,37,31,.14)] backdrop-blur-xl"><div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-[#ebe1d6] text-[#9a6b58]"><Armchair className="h-6 w-6"/></div><p className="mt-5 text-[10px] font-bold uppercase tracking-[.18em] text-[#9a6b58]">Your first board</p><h2 className="mt-2 font-serif text-[30px] tracking-tight">Add one piece to begin</h2><p className="mx-auto mt-3 max-w-[330px] text-sm leading-6 text-black/50">Drag any saved piece here, or upload a new image. We will guide the next step.</p><div className="mt-6 flex justify-center gap-2"><button onClick={() => void addProductToBoard(products[2])} className="pointer-events-auto rounded-full bg-[#26392f] px-5 py-2.5 text-xs font-semibold text-white">Add demo chair</button><button onClick={() => fileInputRef.current?.click()} className="pointer-events-auto rounded-full border border-black/10 bg-white px-5 py-2.5 text-xs font-semibold">Upload image</button></div></div>}
       </section>

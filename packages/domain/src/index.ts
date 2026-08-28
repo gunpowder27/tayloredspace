@@ -13,6 +13,7 @@ export type ProductMetadata = {
 };
 
 export type PiecePosition = { x: number; y: number; width: number; height: number };
+export type PieceCrop = { x: number; y: number; width: number; height: number; naturalWidth: number; naturalHeight: number };
 
 export type TayloredPiece = {
   id: string;
@@ -28,6 +29,14 @@ export type TayloredPiece = {
   position: PiecePosition;
   /** A saved piece can exist in the collection without being placed on the board. */
   onBoard?: boolean;
+  /** Board-only presentation state. */
+  rotation?: number;
+  flipX?: boolean;
+  flipY?: boolean;
+  crop?: PieceCrop | null;
+  zIndex?: number;
+  /** Extra board instance of a saved item; hidden from Saved Pieces. */
+  isBoardDuplicate?: boolean;
 };
 
 export type ExtensionCapture = {
