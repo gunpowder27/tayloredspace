@@ -26,6 +26,8 @@ export type TayloredPiece = {
   text?: string;
   product?: ProductMetadata;
   position: PiecePosition;
+  /** A saved piece can exist in the collection without being placed on the board. */
+  onBoard?: boolean;
 };
 
 export type ExtensionCapture = {
@@ -45,4 +47,5 @@ export const captureToPiece = (capture: ExtensionCapture, boardId = "default"): 
   imageDataUrl: capture.imageDataUrl ?? capture.imageUrl,
   product: capture.product,
   position: { x: 120, y: 120, width: 320, height: 320 },
+  onBoard: false,
 });

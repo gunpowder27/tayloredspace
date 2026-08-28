@@ -73,13 +73,13 @@ export function Board() {
     }
   }, []);
 
-  const addPieces = useCallback(async (incoming: TayloredPiece[]) => {
-    const fresh = incoming.filter((piece) => !known.current.has(piece.id));
+  const addPieces = useCallback(async (incoming: TayloredPiece[], placeOnBoard = false) => {
+    const fresh = incoming.map((piece) => ({ ...piece, onBoard: piece.onBoard ?? placeOnBoard })).filter((piece) => !known.current.has(piece.id));
     if (!fresh.length) return;
     fresh.forEach((piece) => known.current.add(piece.id));
     await pieceStore.putMany(fresh);
     setPieces((current) => [...current, ...fresh]);
-    setStatus(`${fresh.length} ${fresh.length === 1 ? "piece" : "pieces"} added to your board`);
+    setStatus(`${fresh.length} ${fresh.length === 1 ? "piece" : "pieces"} saved to your collection`);
     for (const piece of fresh) {
       if (!piece.imageDataUrl || !["product", "upload"].includes(piece.type)) continue;
       try {
@@ -92,8 +92,10 @@ export function Board() {
   }, [processPieceImage]);
 
   useEffect(() => { pieceStore.list().then((stored) => {
-    stored.forEach((piece) => known.current.add(piece.id));
-    setPieces((current) => [...stored, ...current.filter((piece) => !stored.some((saved) => saved.id === piece.id))]);
+    const migrated = stored.map((piece) => piece.onBoard === undefined ? { ...piece, onBoard: true } : piece);
+    migrated.forEach((piece) => known.current.add(piece.id));
+    void pieceStore.putMany(migrated);
+    setPieces((current) => [...migrated, ...current.filter((piece) => !migrated.some((saved) => saved.id === piece.id))]);
   }); }, []);
   useEffect(() => { warmImageBackgroundRemoval(); }, []);
   useEffect(() => { const savedRoomName = window.localStorage.getItem("tayloredspace-room-name"); if (savedRoomName) setRoomName(savedRoomName); }, []);
@@ -123,8 +125,9 @@ export function Board() {
     const fileId = toFileId(piece.id, piece.imageVariant);
     return [[fileId, { id: fileId, dataURL: dataURL as never, mimeType: (dataURL.slice(5, dataURL.indexOf(";")) || "image/png") as never, created: Date.parse(piece.createdAt), lastRetrieved: Date.now() }]];
   })), [pieces, assetUrls]);
-  const elements = useMemo(() => pieces.flatMap(pieceElements), [pieces]);
-  const sceneKey = useMemo(() => pieces.map((piece) => [piece.id, piece.imageVariant, piece.position.x, piece.position.y, piece.position.width, piece.position.height, assetUrls[piece.id]?.original ? "original-ready" : "", assetUrls[piece.id]?.cutout ? "cutout-ready" : ""].join(":" )).join("|"), [pieces, assetUrls]);
+  const boardPieces = useMemo(() => pieces.filter((piece) => piece.onBoard !== false), [pieces]);
+  const elements = useMemo(() => boardPieces.flatMap(pieceElements), [boardPieces]);
+  const sceneKey = useMemo(() => boardPieces.map((piece) => [piece.id, piece.imageVariant, piece.position.x, piece.position.y, piece.position.width, piece.position.height, assetUrls[piece.id]?.original ? "original-ready" : "", assetUrls[piece.id]?.cutout ? "cutout-ready" : ""].join(":" )).join("|"), [boardPieces, assetUrls]);
 
   const products = [
     { name: "Lennon sofa", price: "$1,899", category: "Seating", retailer: "Demo collection", image: "/demo/lennon-sofa.jpg" },
@@ -146,7 +149,7 @@ export function Board() {
     try {
       const now = new Date().toISOString();
       const piece: TayloredPiece = { id: crypto.randomUUID(), boardId: "default", type: "product", createdAt: now, updatedAt: now, imageDataUrl: await imageToDataUrl(product.image), product: { sourceUrl: product.image, title: product.name, price: product.price, retailer: product.retailer }, position: { x: 280 + (pieces.length % 4) * 34, y: 190 + (pieces.length % 4) * 28, width: 300, height: 250 } };
-      await addPieces([piece]);
+      await addPieces([piece], true);
       setSelectedPieceId(piece.id);
     } catch { setStatus("Could not add that image — try again"); }
   };
@@ -169,11 +172,11 @@ export function Board() {
       setStatus("Confirm before removing — your piece is still safe");
       return;
     }
-    await pieceStore.remove(selectedPiece.id);
-    known.current.delete(selectedPiece.id);
-    setPieces((current) => current.filter((piece) => piece.id !== selectedPiece.id));
+    const updated = { ...selectedPiece, onBoard: false, updatedAt: new Date().toISOString() };
+    await pieceStore.put(updated);
+    setPieces((current) => current.map((piece) => piece.id === updated.id ? updated : piece));
     setSelectedPieceId(undefined);
-    setStatus("Piece removed from this board");
+    setStatus("Removed from the board — it is still saved in your collection");
   };
   const startGuidedDemo = async () => {
     setTourStep(1);
@@ -181,7 +184,7 @@ export function Board() {
     if (!saved) return addProductToBoard(products[2]);
     setSelectedPieceId(saved.id);
     if (assetUrls[saved.id]?.cutout) {
-      const updated = { ...saved, imageVariant: "cutout" as const, updatedAt: new Date().toISOString() };
+      const updated = { ...saved, onBoard: true, imageVariant: "cutout" as const, updatedAt: new Date().toISOString() };
       await pieceStore.put(updated);
       setPieces((current) => current.map((piece) => piece.id === updated.id ? updated : piece));
       setStatus("Cutout ready — click and drag the product to style your board");
@@ -202,7 +205,7 @@ export function Board() {
     setStatus(`Adding ${file.name}…`);
     const now = new Date().toISOString();
     const piece: TayloredPiece = { id: crypto.randomUUID(), boardId: "default", type: "upload", createdAt: now, updatedAt: now, imageDataUrl: await blobToDataUrl(file), text: file.name, position: { x: 300 + (pieces.length % 4) * 32, y: 210 + (pieces.length % 4) * 26, width: 320, height: 260 } };
-    await addPieces([piece]);
+    await addPieces([piece], true);
     setSelectedPieceId(piece.id);
     setStatus("Image added — drag it anywhere on the board");
   };
@@ -228,7 +231,7 @@ export function Board() {
       width: piece.position.width,
       height: piece.position.height,
     };
-    const updated = { ...piece, position, updatedAt: new Date().toISOString() };
+    const updated = { ...piece, onBoard: true, position, updatedAt: new Date().toISOString() };
     await pieceStore.put(updated);
     setPieces((current) => current.map((item) => item.id === updated.id ? updated : item));
     setSelectedPieceId(updated.id);
@@ -260,7 +263,7 @@ export function Board() {
         <div onPointerUpCapture={(event: ReactPointerEvent<HTMLDivElement>) => { if (draggingPieceId) { void placePieceAt(draggingPieceId, event.clientX, event.clientY); setDraggingPieceId(undefined); } }} onPointerCancel={() => setDraggingPieceId(undefined)} className="h-full overflow-hidden rounded-[22px] border border-black/[.08] bg-[#f9f8f5] shadow-[0_16px_50px_rgba(52,46,38,.08)]">
           <Excalidraw key={sceneKey} onChange={(sceneElements: readonly ExcalidrawElement[], appState: AppState) => { const selected = sceneElements.find((element) => appState.selectedElementIds[element.id])?.customData?.pieceId as string | undefined; if (selected) setSelectedPieceId(selected); const moved = sceneElements.flatMap((element) => { const pieceId = element.customData?.pieceId as string | undefined; if (!pieceId || element.type !== "image") return []; const piece = pieces.find((item) => item.id === pieceId); if (!piece || (piece.position.x === element.x && piece.position.y === element.y && piece.position.width === element.width && piece.position.height === element.height)) return []; return [{ piece, position: { x: element.x, y: element.y, width: element.width, height: element.height } }]; }); if (moved.length) { setPieces((current) => current.map((piece) => { const change = moved.find((item) => item.piece.id === piece.id); return change ? { ...piece, position: change.position } : piece; })); moved.forEach(({ piece, position }) => { void pieceStore.put({ ...piece, updatedAt: new Date().toISOString(), position }); }); } }} excalidrawAPI={(api: ExcalidrawImperativeAPI) => { apiRef.current = api; }} initialData={{ elements, files, appState: { viewBackgroundColor: "#f9f8f5" } }} UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false} }}/>
         </div>
-        {!pieces.length && !tourOpen && <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 w-[410px] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-black/[.08] bg-white/90 p-8 text-center shadow-[0_25px_80px_rgba(43,37,31,.14)] backdrop-blur-xl"><div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-[#ebe1d6] text-[#9a6b58]"><Armchair className="h-6 w-6"/></div><p className="mt-5 text-[10px] font-bold uppercase tracking-[.18em] text-[#9a6b58]">Your first board</p><h2 className="mt-2 font-serif text-[30px] tracking-tight">Add one piece to begin</h2><p className="mx-auto mt-3 max-w-[330px] text-sm leading-6 text-black/50">Try the demo chair, or upload your own image. We will guide the next step.</p><div className="mt-6 flex justify-center gap-2"><button onClick={() => void addProductToBoard(products[2])} className="pointer-events-auto rounded-full bg-[#26392f] px-5 py-2.5 text-xs font-semibold text-white">Add demo chair</button><button onClick={() => fileInputRef.current?.click()} className="pointer-events-auto rounded-full border border-black/10 bg-white px-5 py-2.5 text-xs font-semibold">Upload image</button></div></div>}
+        {!boardPieces.length && !tourOpen && <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 w-[410px] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-black/[.08] bg-white/90 p-8 text-center shadow-[0_25px_80px_rgba(43,37,31,.14)] backdrop-blur-xl"><div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-[#ebe1d6] text-[#9a6b58]"><Armchair className="h-6 w-6"/></div><p className="mt-5 text-[10px] font-bold uppercase tracking-[.18em] text-[#9a6b58]">Your first board</p><h2 className="mt-2 font-serif text-[30px] tracking-tight">Add one piece to begin</h2><p className="mx-auto mt-3 max-w-[330px] text-sm leading-6 text-black/50">Drag any saved piece here, or upload a new image. We will guide the next step.</p><div className="mt-6 flex justify-center gap-2"><button onClick={() => void addProductToBoard(products[2])} className="pointer-events-auto rounded-full bg-[#26392f] px-5 py-2.5 text-xs font-semibold text-white">Add demo chair</button><button onClick={() => fileInputRef.current?.click()} className="pointer-events-auto rounded-full border border-black/10 bg-white px-5 py-2.5 text-xs font-semibold">Upload image</button></div></div>}
       </section>
 
       <aside className="w-[238px] shrink-0 border-l border-black/[.07] bg-[#f8f6f1] p-5">{selectedPiece ? <><p className="text-[10px] font-bold uppercase tracking-[.16em] text-[#9a6b58]">Selected piece</p><h3 className="mt-2 font-serif text-xl">Edit product</h3><div className="mt-4 rounded-xl border border-black/[.07] bg-white p-2"><p className="px-1 pb-2 text-[10px] font-bold uppercase tracking-wider text-black/40">Product image</p><div className="grid grid-cols-2 gap-1"><button onClick={() => void setImageVariant("original")} className={selectedPiece.imageVariant !== "cutout" ? "flex items-center justify-center gap-1.5 rounded-lg bg-[#26392f] px-2 py-2 text-[10px] font-semibold text-white" : "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[10px] font-semibold text-black/50"}><ImageIcon className="h-3.5 w-3.5"/>Original</button><button disabled={!assetUrls[selectedPiece.id]?.cutout} onClick={() => void setImageVariant("cutout")} className={selectedPiece.imageVariant === "cutout" ? "flex items-center justify-center gap-1.5 rounded-lg bg-[#26392f] px-2 py-2 text-[10px] font-semibold text-white" : "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[10px] font-semibold text-black/50 disabled:opacity-30"}><Scissors className="h-3.5 w-3.5"/>Cutout</button></div><button disabled={Boolean(processing[selectedPiece.id])} onClick={() => void processPieceImage(selectedPiece, true)} className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#ebe1d6] px-2 py-2 text-[10px] font-semibold text-[#795747] disabled:opacity-60"><RefreshCw className={processing[selectedPiece.id] ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"}/>{processing[selectedPiece.id] ?? (assetUrls[selectedPiece.id]?.cutout ? "Remake cutout" : "Remove background")}</button></div><label className="mt-5 block text-[10px] font-bold uppercase tracking-wider text-black/40">Title<input value={selectedPiece.product?.title ?? selectedPiece.text ?? ""} onChange={(event) => void updateSelectedPiece({ title: event.target.value })} className="mt-2 w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-xs font-normal normal-case tracking-normal outline-none focus:border-[#9a6b58]"/></label><label className="mt-4 block text-[10px] font-bold uppercase tracking-wider text-black/40">Price<input value={selectedPiece.product?.price ?? ""} onChange={(event) => void updateSelectedPiece({ price: event.target.value })} className="mt-2 w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-xs font-normal normal-case tracking-normal outline-none focus:border-[#9a6b58]"/></label><label className="mt-4 block text-[10px] font-bold uppercase tracking-wider text-black/40">Retailer<input value={selectedPiece.product?.retailer ?? ""} onChange={(event) => void updateSelectedPiece({ retailer: event.target.value })} className="mt-2 w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-xs font-normal normal-case tracking-normal outline-none focus:border-[#9a6b58]"/></label>{selectedPiece.product?.sourceUrl && <a href={selectedPiece.product.sourceUrl} target="_blank" className="mt-5 flex items-center gap-2 text-[11px] font-semibold text-[#58705f]">Open source <ExternalLink className="h-3.5 w-3.5"/></a>}<button onClick={() => void deleteSelectedPiece()} className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl border border-red-900/10 bg-red-50 px-3 py-2.5 text-xs font-semibold text-red-800"><Trash2 className="h-3.5 w-3.5"/>Remove from board</button></> : <><p className="text-[10px] font-bold uppercase tracking-[.16em] text-black/40">Room overview</p><div className="mt-4 rounded-2xl border border-black/[.07] bg-white p-4"><p className="text-xs font-semibold">Budget</p><div className="mt-3 flex items-end justify-between"><span className="font-serif text-2xl">${spent.toLocaleString()}</span><span className="text-[10px] text-black/40">of ${budget.toLocaleString()}</span></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#ebe8e2]"><div className="h-full rounded-full bg-[#9a6b58]" style={{ width: `${budgetPercent}%` }}/></div><div className="mt-4 flex items-center gap-2 text-[10px] text-[#58705f]"><CircleDollarSign className="h-3.5 w-3.5"/>${remaining.toLocaleString()} remaining</div></div><div className="mt-5"><p className="text-xs font-semibold">Style direction</p><div className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-[#e7ded2] px-3 py-1.5 text-[10px]">Warm modern</span><span className="rounded-full bg-[#dfe6df] px-3 py-1.5 text-[10px]">Natural</span><span className="rounded-full bg-[#ebe8e2] px-3 py-1.5 text-[10px]">Soft minimal</span></div></div><div className="mt-7 border-t border-black/[.07] pt-5"><div className="flex items-center gap-2"><PackageOpen className="h-4 w-4 text-[#9a6b58]"/><p className="text-xs font-semibold">{pieces.length} {pieces.length === 1 ? "piece" : "pieces"} collected</p></div><p className="mt-2 text-[11px] leading-5 text-black/45">Choose a product card to add it, then click the canvas piece to edit.</p></div></>}</aside>
