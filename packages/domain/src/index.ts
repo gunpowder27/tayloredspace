@@ -35,6 +35,9 @@ export type TayloredPiece = {
   flipY?: boolean;
   crop?: PieceCrop | null;
   zIndex?: number;
+  imageZIndex?: number;
+  labelZIndex?: number;
+  showLabel?: boolean;
   /** Extra board instance of a saved item; hidden from Saved Pieces. */
   isBoardDuplicate?: boolean;
 };
