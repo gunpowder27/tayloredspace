@@ -1,4 +1,6 @@
 export const TAYLOREDSPACE_BRIDGE_EVENT = "tayloredspace:capture" as const;
+export const TAYLOREDSPACE_BRIDGE_ACK_EVENT = "tayloredspace:capture:ack" as const;
+export const TAYLOREDSPACE_BRIDGE_READY_EVENT = "tayloredspace:bridge:ready" as const;
 
 export type TayloredPieceType = "product" | "inspiration" | "render" | "upload" | "note";
 

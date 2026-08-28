@@ -1,4 +1,4 @@
-import { resizeForRemoval, trimTransparentEdges } from "./image-processing";
+import { resizeForRemoval } from "./image-processing";
 
 type WorkerResponse = { id: string; type: "progress" | "complete" | "error"; buffer?: ArrayBuffer; message?: string; progress?: { status?: string; progress?: number } };
 
@@ -54,6 +54,6 @@ export async function removeImageBackground(source: Blob, onProgress?: (label: s
     pendingRemovals.set(id, { resolve, reject, onProgress });
     worker.postMessage({ id, buffer, mimeType: resized.type || "image/png" }, [buffer]);
   });
-  onProgress?.("Trimming edges…");
-  return trimTransparentEdges(cutout);
+  onProgress?.("Finishing cutout…");
+  return cutout;
 }

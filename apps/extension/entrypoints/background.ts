@@ -3,7 +3,7 @@ import type { ExtensionCapture } from "@tayloredspace/domain";
 const QUEUE = "pendingCaptures";
 export default defineBackground(() => {
   browser.runtime.onMessage.addListener(async (rawMessage: unknown) => {
-    const message = rawMessage as { type: string; capture?: ExtensionCapture };
+    const message = rawMessage as { type: string; capture?: ExtensionCapture; captureId?: string };
     if (message.type === "QUEUE_CAPTURE" && message.capture) {
       const stored = await browser.storage.local.get(QUEUE);
       const captures = (stored[QUEUE] as ExtensionCapture[] | undefined) ?? [];
@@ -16,9 +16,9 @@ export default defineBackground(() => {
       const stored = await browser.storage.local.get(QUEUE);
       return { captures: (stored[QUEUE] as ExtensionCapture[] | undefined) ?? [] };
     }
-    if (message.type === "ACK_CAPTURE" && message.capture) {
+    if (message.type === "ACK_CAPTURE" && message.captureId) {
       const stored = await browser.storage.local.get(QUEUE);
-      await browser.storage.local.set({ [QUEUE]: ((stored[QUEUE] as ExtensionCapture[] | undefined) ?? []).filter((item) => item.id !== message.capture!.id) });
+      await browser.storage.local.set({ [QUEUE]: ((stored[QUEUE] as ExtensionCapture[] | undefined) ?? []).filter((item) => item.id !== message.captureId) });
     }
   });
 });

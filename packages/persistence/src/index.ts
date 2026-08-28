@@ -23,6 +23,7 @@ const db = new TayloredSpaceDatabase();
 
 export const pieceStore = {
   list(boardId = "default") { return db.pieces.where("boardId").equals(boardId).toArray(); },
+  get(id: string) { return db.pieces.get(id); },
   async put(piece: TayloredPiece) { await db.pieces.put(piece); },
   async putMany(pieces: TayloredPiece[]) { await db.pieces.bulkPut(pieces); },
   async remove(id: string) {
